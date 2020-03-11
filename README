@@ -1,0 +1,7 @@
+LukeWM written by Luke Kong
+
+Philosophy:
+LukeWM has two modes, cursor mode and cursorless mode. Cursorless mode implements a structure similar to DWM's tiling manager, but usage does not require any cursors/pointers. Each window will have a number on top of it, and users will be able to change their input focus using these numbers and key bindings found in config.h. I will also implement the master/stack structure a bit differently than DWM. Cursor mode is similar to Windows. Usage in cursor mode does not require keyboards (except for typing). Cursor mode will be a basic reparenting window manager, where each window will be given a close button. Windows in cursor mode will be resizable/moable using the normal cursor. 
+
+Usage:
+
