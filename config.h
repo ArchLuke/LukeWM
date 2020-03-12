@@ -16,8 +16,8 @@ static const int cursorless_mode = 1; /*switch to cursorless mode with MODEMASK+
 static const int cursor_mode = 2; /*switch to cursor mode with MODEMASK+2*/
 
 static Key keys[]={
-	{WINDOWMASK, XK_1, switchToCursorless},
-	{WINDOWMASK, XK_2, switchToCursor},
+	{MODEMASK, XK_1, switchToCursorless},
+	{MODEMASK, XK_2, switchToCursor},
 	{WINDOWMASK, XK_A, switchToMaster},
 	{WINDOWMASK, XK_D, switchToSlave},
 	{WINDOWMASK, XK_C, destroyWin},

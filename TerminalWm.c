@@ -4,10 +4,10 @@
 #include <X11/Xatom.h>
 #include <X11/keysym.h>
 #include <X11/Xft/Xft.h>
-
+#include <X11/Xproto.h>
 /*macros*/
 #define LENGTH(X) (sizeof X/ sizeof X[0])
-
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 /*data types*/
 
 
@@ -44,13 +44,18 @@ enum {Foreground, Background};
 
 
 MyScreen *screen;
+XWindowAttributes attr;
+XButtonEvent start;
 int mode;
 XftFont *font=NULL;
 /*function prototypes*/
 void init();
 void eventLoop();
 void checkOtherWM();
+int wmError(Display *, XErrorEvent *);
 void drawBar();
+int xerror(Display *, XErrorEvent *);
+static int (*xerrorxlib)(Display *, XErrorEvent *);
 
 static XftFont *xft_font_alloc(MyScreen *, const char *);
 void xft_color_alloc(MyScreen *, XftColor *, const char *);
@@ -58,9 +63,11 @@ void drawRect(MyScreen *screen, Win *,GC, int, int, unsigned int, unsigned int, 
 void drawTextCenter(MyScreen *, Win *, const char *);
 
 void buttonPress(XEvent *);
+void buttonRelease(XEvent *);
 void configureRequest(XEvent *);
 void configureNotify(XEvent *);
 void createTerm(XEvent *);
+void createNotify(XEvent *);
 void destroyNotify(XEvent *);
 void destroyWin(XEvent *);
 void enterNotify(XEvent *);
@@ -81,8 +88,10 @@ void unmapNotify(XEvent *);
 /*function designated array initializer*/
 static void (*handler[LASTEvent]) (XEvent *) = {
 	[ButtonPress] = buttonPress,
+	[ButtonRelease]=buttonRelease,
 	[ConfigureRequest] = configureRequest,
 	[ConfigureNotify] = configureNotify,
+	[CreateNotify]=createNotify,
 	[DestroyNotify] = destroyNotify,
 	[EnterNotify] = enterNotify,
 	[Expose] = expose,
@@ -151,20 +160,66 @@ void init()
 	screen->rootwin=RootWindow(screen->dpy, screen->screen_num);
 	screen->s_width=DisplayWidth(screen->dpy, screen->screen_num);
 	screen->s_height=DisplayHeight(screen->dpy, screen->screen_num);
-//	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask);
+	checkOtherWM();
+	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask);
 	
 	font=xft_font_alloc(screen, g_font);
+/*kinda not my problem if other apps use these key bindings*/
+
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x31), Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x32), Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+	
+	XGrabButton(screen->dpy, 1, Mod1Mask,screen->rootwin, True,
+            ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
+    	XGrabButton(screen->dpy, 3, Mod1Mask,screen->rootwin, True,
+            ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
+
 	drawBar();	
 }
 void checkOtherWM()
 {
+	XSetErrorHandler(wmError);	
+	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask);
+	XSync(screen->dpy, False);
+	XSetErrorHandler(xerror);
+}
+
+int xerror(Display *dpy, XErrorEvent *ee)
+{
+	if (ee->error_code == BadWindow
+	|| (ee->request_code == X_SetInputFocus && ee->error_code == BadMatch)
+	|| (ee->request_code == X_PolyText8 && ee->error_code == BadDrawable)
+	|| (ee->request_code == X_PolyFillRectangle && ee->error_code == BadDrawable)
+	|| (ee->request_code == X_PolySegment && ee->error_code == BadDrawable)
+	|| (ee->request_code == X_ConfigureWindow && ee->error_code == BadMatch)
+	|| (ee->request_code == X_GrabButton && ee->error_code == BadAccess)
+	|| (ee->request_code == X_GrabKey && ee->error_code == BadAccess)
+	|| (ee->request_code == X_CopyArea && ee->error_code == BadDrawable))
+		return 0;
+	fprintf(stderr, "fatal error: request code=%d, error code=%d\n",
+		ee->request_code, ee->error_code);
+	return xerrorxlib(dpy, ee); 
+}
+
+int wmError(Display *dpy, XErrorEvent *ev)
+{
+	fprintf(stderr, "another wm is already running");
+	exit(1);
+	return -1;
+}
+void createNotify(XEvent *ev)
+{
+
+/*nothing for the wm to do with a CreateNotify event */
+
 }
 void eventloop()
 {
 
 	XEvent ev;
 	for(;;){
-		printf("loop \n");
 		XNextEvent(screen->dpy, &ev);
 		if(handler[ev.type])
 			handler[ev.type](&ev);
@@ -209,12 +264,46 @@ void drawBar()
 	XMapWindow(screen->dpy, cursor_mode->win);
 	drawTextCenter(screen,cursorless_mode,"1");
 	drawTextCenter(screen,cursor_mode,"2");
+	
+	
 }
 void buttonPress(XEvent *ev)
 {
+	printf("called\n");
+	XButtonEvent *event=&ev->xbutton;
+	if(mode==1){
+		if(event->subwindow != None)
+        	{
+            		XGetWindowAttributes(screen->dpy, event->subwindow, &attr);
+            		start = *event;
+			
+        	}
+	}
+}
+void buttonRelease(XEvent *ev)
+{
+	XButtonEvent *event=&ev->xbutton;
+
+	if(mode==1)
+		start.subwindow=None;		
+
 }
 void configureRequest(XEvent *ev)
 {
+/*Configure requests are called at window startups. Allow the request by invoking a configure request ourselves*/
+	XConfigureRequestEvent *event;
+	event=&ev->xconfigurerequest;
+	XWindowChanges changes;
+  // Copy fields from event to changes.
+	changes.x = event->x;
+	changes.y = event->y;
+	changes.width = event->width;
+	changes.height = event->height;
+	changes.border_width = event->border_width;
+	changes.sibling = event->above;
+	changes.stack_mode = event->detail;
+ 
+	XConfigureWindow(screen->dpy, event->window, event->value_mask, &changes);
 }
 void configureNotify(XEvent *ev)
 {
@@ -240,33 +329,53 @@ void focusIn(XEvent *ev)
 }
 void keyPress(XEvent *ev)
 {
-	printf("keyPress called\n");
 	XKeyEvent *event=&ev->xkey;
 	KeySym keysym = XKeycodeToKeysym(screen->dpy, (KeyCode)event->keycode, 0);
 	for (int i = 0; i < LENGTH(keys); i++)
+	{
 		if (keysym == keys[i].keysym
 		&& (keys[i].mod) == (event->state)
 		&& keys[i].func)
-			keys[i].func(ev);	
+			keys[i].func(ev);
+	}	
 }
 void mappingNotify(XEvent *ev)
 {
 }
 void mapRequest(XEvent *ev)
 {
+	XMapRequestEvent *event;
+	event=&ev->xmaprequest;
+/*reparenting with our own window*/
+
+/*allow the map request*/
+	XMapWindow(screen->dpy, event->window);
 }
-void motionNotify(XEvent *ev)
-{
+void motionNotify(XEvent *ev){
+	XMotionEvent *event=&ev->xmotion;
+	int xdiff;
+	int ydiff;
+	if(mode==1)
+	{
+		if(start.subwindow != None)
+		{
+			xdiff = (event->x_root) - (start.x_root);
+			ydiff = (event->y_root) - (start.y_root);
+			XMoveResizeWindow(screen->dpy, start.subwindow,
+				attr.x + (start.button==1 ? xdiff : 0),
+				attr.y + (start.button==1 ? ydiff : 0),
+				MAX(1, attr.width + (start.button==3 ? xdiff : 0)),
+				MAX(1, attr.height + (start.button==3 ? ydiff : 0)));
+		}
+	}
 }
 void switchToCursorless(XEvent *ev)
 {
-	printf("called\n");
 	mode=0;
 	drawBar();
 }
 void switchToCursor(XEvent *ev)
 {
-	printf("called 2\n");
 	mode=1;
 	drawBar();
 }
