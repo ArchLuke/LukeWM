@@ -8,6 +8,7 @@
 /*macros*/
 #define LENGTH(X) (sizeof X/ sizeof X[0])
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a,b)  ((a)<(b)?(a):(b));
 /*data types*/
 
 
@@ -18,14 +19,21 @@ struct MyScreen
 {
 	Display *dpy;	
 	Window rootwin;
+	Colormap cmap;
 	int screen_num;
 	int s_width, s_height; //display_width and height
 };
 struct Win
 {
 	Window win;
-	Atom tag_number; /*the number that appears on top of each window*/
-	Atom mode;/*the mode that a window is under*/
+	Window subwin; /*---only in cursor mode---the child win of the reparenting window*/
+/*
+I made mode, tag_number, and status of type Atom for POTENTIAL future inter-client communications. 
+I am imagining writing other helper X applications, specifically made for TerminalWM, that further enhance the usability of my DM. These applications may require the mode, tag_number, and status of itself or any other windows.
+
+*/
+	Atom mode;
+	Atom tag_number; /*---only in cursorless mode---the number that appears on top of each window*/
 	Atom status;/*---only in cursorless mode---the master/stack status of a window*/
 	int x,y;
 	int width, height;
@@ -74,15 +82,17 @@ void enterNotify(XEvent *);
 void expose(XEvent *);
 void focusIn(XEvent *);
 void keyPress(XEvent *);
+void leaveNotify(XEvent *);
 void mappingNotify(XEvent *);
 void mapRequest(XEvent *);
 void motionNotify(XEvent *);
+void reparentWin(Window);
 void switchToCursorless(XEvent *);
 void switchToCursor(XEvent *);
 void switchToMaster(XEvent *);
 void switchToSlave(XEvent *);
 void unmapNotify(XEvent *);
-
+void thisIsATrollFunctionPrototype();
 #include "config.h"
 
 /*function designated array initializer*/
@@ -94,6 +104,7 @@ static void (*handler[LASTEvent]) (XEvent *) = {
 	[CreateNotify]=createNotify,
 	[DestroyNotify] = destroyNotify,
 	[EnterNotify] = enterNotify,
+	[LeaveNotify] = leaveNotify,
 	[Expose] = expose,
 	[FocusIn] = focusIn,
 	[KeyPress] = keyPress,
@@ -122,7 +133,7 @@ xft_color_alloc(MyScreen *screen, XftColor *color, const char *colorName)
 		return;
 
 	if (!XftColorAllocName(screen->dpy, DefaultVisual(screen->dpy, screen->screen_num),
-	                       DefaultColormap(screen->dpy, screen->screen_num),
+	                       screen->cmap,
 	                       colorName, color))
 		fprintf(stderr,"error, cannot allocate color '%s'", colorName);
 }
@@ -185,7 +196,6 @@ void checkOtherWM()
 	XSync(screen->dpy, False);
 	XSetErrorHandler(xerror);
 }
-
 int xerror(Display *dpy, XErrorEvent *ee)
 {
 	if (ee->error_code == BadWindow
@@ -227,16 +237,17 @@ void eventloop()
 }
 void drawBar()
 {
-	Colormap cmap = DefaultColormap(screen->dpy, screen->screen_num);
+	screen->cmap = DefaultColormap(screen->dpy, screen->screen_num);
 	XColor col;
 	XColor active_col;
-	XParseColor(screen->dpy,cmap,"rgb:88/88/88",&col);
-	XAllocColor(screen->dpy, cmap, &col);	
-	XParseColor(screen->dpy, cmap, active_mode_col, &active_col);
-	XAllocColor(screen->dpy, cmap, &active_col);
+	XParseColor(screen->dpy,screen->cmap,bar_col,&col);
+	XAllocColor(screen->dpy, screen->cmap, &col);	
+	XParseColor(screen->dpy, screen->cmap, active_mode_col, &active_col);
+	XAllocColor(screen->dpy, screen->cmap, &active_col);
 	
 	Window bar=XCreateSimpleWindow(screen->dpy, 
 					screen->rootwin,0,0, screen->s_width, 20, 0, BlackPixel(screen->dpy, screen->screen_num),col.pixel);
+
 
 	Win *cursorless_mode=malloc(sizeof(Win));
 	Window cursorless_mode_win=XCreateSimpleWindow(screen->dpy, 
@@ -269,7 +280,6 @@ void drawBar()
 }
 void buttonPress(XEvent *ev)
 {
-	printf("called\n");
 	XButtonEvent *event=&ev->xbutton;
 	if(mode==1){
 		if(event->subwindow != None)
@@ -290,35 +300,50 @@ void buttonRelease(XEvent *ev)
 }
 void configureRequest(XEvent *ev)
 {
-/*Configure requests are called at window startups. Allow the request by invoking a configure request ourselves*/
+	
+	/*Configure requests are called at window startups. Allow the request by invoking a configure request ourselves*/
 	XConfigureRequestEvent *event;
 	event=&ev->xconfigurerequest;
-	XWindowChanges changes;
+	XWindowChanges changes={};
   // Copy fields from event to changes.
 	changes.x = event->x;
-	changes.y = event->y;
+//making sure the window does not go out of bounds
+	changes.y = ((event->y)>40)?(event->y):40;
+
 	changes.width = event->width;
 	changes.height = event->height;
 	changes.border_width = event->border_width;
 	changes.sibling = event->above;
 	changes.stack_mode = event->detail;
- 
-	XConfigureWindow(screen->dpy, event->window, event->value_mask, &changes);
+ 	
+	XConfigureWindow(screen->dpy, event->window,CWX | CWY | CWWidth | CWHeight, &changes);
 }
 void configureNotify(XEvent *ev)
 {
+
 }
 void createTerm(XEvent *ev)
 {
+
 }
 void destroyNotify(XEvent *ev)
 {
+
 }
 void destroyWin(XEvent *ev)
 {
+
 }
 void enterNotify(XEvent *ev)
 {
+	XCrossingEvent *event=&ev->xcrossing;
+	XColor new_bg;
+	XParseColor(screen->dpy,screen->cmap,"#FFFFFF", &new_bg);
+	XAllocColor(screen->dpy,screen->cmap,&new_bg);
+	XSetWindowBackground(screen->dpy,event->window, new_bg.pixel);
+	XFlush(screen->dpy);
+	
+			
 }
 void expose(XEvent *ev)
 {
@@ -339,6 +364,15 @@ void keyPress(XEvent *ev)
 			keys[i].func(ev);
 	}	
 }
+void leaveNotify(XEvent *ev)
+{
+	XCrossingEvent *event=&ev->xcrossing;
+	XColor new_bg;
+	XParseColor(screen->dpy,screen->cmap,parent_col, &new_bg);
+	XAllocColor(screen->dpy, screen->cmap,&new_bg);
+	XSetWindowBackground(screen->dpy,event->window, new_bg.pixel);
+
+}
 void mappingNotify(XEvent *ev)
 {
 }
@@ -346,28 +380,95 @@ void mapRequest(XEvent *ev)
 {
 	XMapRequestEvent *event;
 	event=&ev->xmaprequest;
-/*reparenting with our own window*/
+/*reparenting with our own window, adding close buttons and etc.*/
+	reparentWin(event->window);
 
 /*allow the map request*/
 	XMapWindow(screen->dpy, event->window);
 }
 void motionNotify(XEvent *ev){
 	XMotionEvent *event=&ev->xmotion;
-	int xdiff;
-	int ydiff;
+	int xdiff, ydiff;
+	int new_x=start.x_root;
+	int new_y=start.y_root;
+	int new_width=attr.width;
+	int  new_height=attr.height;
 	if(mode==1)
 	{
 		if(start.subwindow != None)
 		{
 			xdiff = (event->x_root) - (start.x_root);
 			ydiff = (event->y_root) - (start.y_root);
+			
+			new_x=MAX((attr.x + (start.button==1 ? xdiff : 0)),0); /*left boundary*/
+			new_x=MIN((screen->s_width-attr.width),new_x);/*right boundary*/
+			new_y=MAX((attr.y + (start.button==1 ? ydiff : 0)),20);/*upper bound*/
+			new_y=MIN((screen->s_height-attr.height),new_y);/*lower bound*/
+
+			new_width=MAX(40, attr.width + (start.button==3 ? xdiff : 0));/*minimum width*/
+			new_height=MAX(40, attr.height + (start.button==3 ? ydiff : 0));/*minimum height*/
+			new_width=((attr.x+new_width)>screen->s_width)?(screen->s_width-attr.x):new_width;/*maximum width*/	
+			new_height=((attr.y+new_height)>screen->s_height)?(screen->s_height-attr.y):new_height;/*maximum width*/
+			
 			XMoveResizeWindow(screen->dpy, start.subwindow,
-				attr.x + (start.button==1 ? xdiff : 0),
-				attr.y + (start.button==1 ? ydiff : 0),
-				MAX(1, attr.width + (start.button==3 ? xdiff : 0)),
-				MAX(1, attr.height + (start.button==3 ? ydiff : 0)));
+				new_x,
+				new_y,	
+				new_width,
+				new_height);
+
+			/*resizing childwins*/
+
+			Window *childwin;
+			Window parentWin;
+			Window rootwin;
+			int number;
+			XQueryTree(screen->dpy,start.subwindow,&rootwin,&parentWin, &childwin,&number);
+			XMoveWindow(screen->dpy, childwin[0],new_width-20, 0);
+			XResizeWindow(screen->dpy,childwin[1], new_width, new_height-20);
 		}
 	}
+}
+void reparentWin(Window win)
+{
+/*Getting the attributes of win*/
+
+	XWindowAttributes attr;
+	XGetWindowAttributes(screen->dpy, win, &attr);
+	
+	/*creating the parent window of type Win*/
+	Win *parent=malloc(sizeof(Win));
+	XColor background;
+	XftColor foreground;
+
+	XParseColor(screen->dpy, screen->cmap, parent_col,&background);
+	XAllocColor(screen->dpy, screen->cmap, &background);
+	xft_color_alloc(screen, &foreground, "#ffffff");
+	Window parent_win=XCreateSimpleWindow(screen->dpy,screen->rootwin, attr.x, attr.y-20,attr.width, attr.height+20,1,BlackPixel(screen->dpy, screen->screen_num),background.pixel);
+
+	Win *cross=malloc(sizeof(Win));
+	Window cross_win=XCreateSimpleWindow(screen->dpy, parent_win,attr.width-20,0,20,20, 1, BlackPixel(screen->dpy, screen->screen_num),background.pixel);
+	cross->win=cross_win;
+	cross->font=font;
+	cross->scheme[0]=foreground;
+/* we care when the cursor enters the window or when the window is pressed*/
+
+	XSelectInput(screen->dpy,cross_win, EnterWindowMask | LeaveWindowMask | ButtonPressMask);
+	parent->win=parent_win;
+	parent->subwin=win;
+	parent->font=font;
+	parent->scheme[0]=foreground;
+
+	drawTextCenter(screen,cross,"X");
+
+	XReparentWindow(screen->dpy,win,parent_win,0,20);
+
+/*nd stopping the key bindings/cursor from affecting it. It is not the cleanest implementation I know. I will think of another way in the future*/
+	XSetWindowAttributes attrs;
+	attrs.do_not_propagate_mask=ButtonPressMask;
+	XChangeWindowAttributes(screen->dpy,win,CWDontPropagate,&attrs);
+	XMapWindow(screen->dpy, cross_win);
+	XMapWindow(screen->dpy, parent_win);
+			
 }
 void switchToCursorless(XEvent *ev)
 {
@@ -381,13 +482,15 @@ void switchToCursor(XEvent *ev)
 }
 void switchToMaster(XEvent *ev)
 {
+
 }
 void switchToSlave(XEvent *ev)
 {
-}
- 
+
+} 
 void unmapNotify(XEvent *ev)
 {
+
 }
 int main()
 {
