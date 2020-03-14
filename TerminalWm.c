@@ -27,14 +27,6 @@ struct Win
 {
 	char name[5];
 	Window win;
-/*
-I made mode, tag_number, and status of type Atom for POTENTIAL future inter-client communications. 
-I am imagining writing other helper X applications, specifically made for TerminalWM, that further enhance the usability of my DM. These applications may require the mode, tag_number, and status of itself or any other windows.
-
-*/
-	Atom mode;
-	Atom tag_number; /*---only in cursorless mode---the number that appears on top of each window*/
-	Atom status;/*---only in cursorless mode---the master/stack status of a window*/
 	int x,y;
 	int width, height;
 	GC gc;
@@ -52,25 +44,41 @@ enum {Foreground, Background};
 
 
 MyScreen *screen;
+
 XWindowAttributes attr;
 XButtonEvent start;
 
-/*colors*/
+/*appearances*/
 XColor active_col;
 XColor bar_color;
 XColor par_col;
 XftColor white;
 XftColor black;
-/*Win related datas*/
+XftFont *font=NULL;
+
+/*Window related datas*/
+
 Win *cursorless_mode;//the bar
 Win *cursor_mode;//the bar
-Window *cursor_wins;
+Window *cursor_wins;//This list will also be used for future features such as minimizing (using XA_WM_NAME)
 int cursor_length=0;//number of entries in cursor_wins;
-Win **cursorless_wins;
+Win *cursorless_wins;
 int cursorless_length=0;//number of entries in cursorless_wins;
-
 int mode=1;
-XftFont *font=NULL;
+
+/*atoms*/
+
+Atom utf8_string;
+/*
+I made mode, tag_number, and status of type Atom for POTENTIAL future inter-client communications. 
+I am imagining writing other helper X applications, specifically made for TerminalWM, that further enhance the usability of my DM. These applications may require the mode, tag_number, and status of itself or any other windows.
+
+*/
+Atom tag_number; /*the number that appears on top of each window.
+This number is 0 if the window is in cursor mode;*/
+Atom status;/*the master/stack status of a window
+The number is 0 if the window is in cursor mode*/
+
 /*function prototypes*/
 void init();
 void eventLoop();
@@ -82,6 +90,8 @@ static int (*xerrorxlib)(Display *, XErrorEvent *);
 
 static XftFont *xft_font_alloc(MyScreen *, const char *);
 void xft_color_alloc(MyScreen *, XftColor *, const char *);
+void addToCursorList(Window win);
+void addToCursorLessList(Win win);
 void drawRect(MyScreen *screen, Win *,GC, int, int, unsigned int, unsigned int, int);
 void drawTextCenter(MyScreen *, Win *, const char *);
 void buttonPress(XEvent *);
@@ -105,10 +115,10 @@ void switchToCursorless(XEvent *);
 void switchToCursor(XEvent *);
 void switchToMaster(XEvent *);
 void switchToSlave(XEvent *);
-void updateCursorList(Window win);
-void updateCursorLessList(Win *win);
+void tileWins();
+void removeFromCursorList(Window win);
+void removeFromCursorLessList(Win *win);
 void unmapNotify(XEvent *);
-void thisIsATrollFunctionPrototype();
 #include "config.h"
 
 /*function designated array initializer*/
@@ -184,7 +194,7 @@ void init()
 		
 	screen=malloc(sizeof(MyScreen));
 	cursor_wins=calloc(10, sizeof(Window));
-	cursorless_wins=calloc(10,sizeof(void *));
+	cursorless_wins=calloc(10,sizeof(Win));
 	screen->dpy=XOpenDisplay(NULL);
 	screen->screen_num=DefaultScreen(screen->dpy);
 	screen->rootwin=RootWindow(screen->dpy, screen->screen_num);
@@ -201,12 +211,17 @@ void init()
 	xft_color_alloc(screen, &white, "#ffffff");
 	xft_color_alloc(screen, &black,"#000000");
 
-
+/*global atoms initialization*/
+	utf8_string=XInternAtom(screen->dpy,"UTF8_STRING", False);
+	tag_number=XInternAtom(screen->dpy,"tag number",False);
+	status=XInternAtom(screen->dpy, "status", False);
+	
 	checkOtherWM();
+/*the gut of the wm*/
 	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask|ExposureMask);
 	
 	font=xft_font_alloc(screen, g_font);
-/*kinda not my problem if other apps use these key bindings*/
+/*global root grabs*/
 
 	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x74), ShiftMask,
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
@@ -215,8 +230,6 @@ void init()
 	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x32), Mod1Mask,
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);
 
-//	XGrabButton(screen->dpy, 1,None,screen->rootwin, True,
-  //          ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
 	XGrabButton(screen->dpy, 1, Mod1Mask,screen->rootwin, True,
             ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
     	XGrabButton(screen->dpy, 3, Mod1Mask,screen->rootwin, True,
@@ -300,6 +313,17 @@ void drawBar()
 	
 	
 }
+void addToCursorList(Window win)
+{
+	cursor_wins[cursor_length]=win;
+	cursor_length ++;
+
+}
+void addToCursorLessList(Win win)
+{
+	cursorless_wins[cursorless_length]=win;
+	cursorless_length++;
+}
 void buttonPress(XEvent *ev)
 {
 	XButtonEvent *event=&ev->xbutton;
@@ -333,15 +357,11 @@ void buttonPress(XEvent *ev)
 			Window parent;
 			Window *childwins;
 			int number;
-			printf("destroy start\n");
 /*getting and shutting down the reparenting window, which in turn shuts down the main window*/
 			XQueryTree(screen->dpy,event->window,&root,&parent,&childwins,&number);
-			printf("query finished\n");
 			if(parent)
 				XDestroyWindow(screen->dpy,parent);
-			printf("destroy finished\n");
-			updateCursorList(parent);
-			printf("update finished\n");
+			removeFromCursorList(parent);
 		}
 	}
 }
@@ -359,14 +379,22 @@ void configureRequest(XEvent *ev)
 	/*Configure requests are called at window startups. Allow the request by invoking a configure request ourselves*/
 	XConfigureRequestEvent *event;
 	event=&ev->xconfigurerequest;
-	XWindowChanges changes={};
+	XWindowChanges changes;
   // Copy fields from event to changes.
 	changes.x = event->x;
 //making sure the window does not go out of bounds
 	changes.y = ((event->y)>40)?(event->y):40;
-
-	changes.width = event->width;
-	changes.height = event->height;
+	if(mode==1)
+	{
+		changes.width = event->width;
+		changes.height = event->height;
+	}else{
+		/*master pane attributes*/
+		changes.x=0;
+		changes.y=40;
+		changes.width=screen->s_width/2;
+		changes.height=screen->s_height-40;
+	}
 	changes.border_width = event->border_width;
 	changes.sibling = event->above;
 	changes.stack_mode = event->detail;
@@ -419,7 +447,6 @@ void keyPress(XEvent *ev)
 {
 	XKeyEvent *event=&ev->xkey;
 	KeySym keysym = XKeycodeToKeysym(screen->dpy, (KeyCode)event->keycode, 0);
-	printf("key called \n");
 	for (int i = 0; i < LENGTH(keys); i++)
 	{
 		if (keysym == keys[i].keysym
@@ -437,7 +464,6 @@ void leaveNotify(XEvent *ev)
 	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),0,0,20,20);
 	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),20,0,0,20);
 
-//	free(target);
 //	XFlush(screen->dpy);
 
 }
@@ -450,7 +476,10 @@ void mapRequest(XEvent *ev)
 	event=&ev->xmaprequest;
 /*reparenting with our own window, adding close buttons and etc.*/
 	reparentWin(event->window);
-
+	if(mode==0 && cursorless_length>1)
+	{
+		tileWins();
+	}
 /*allow the map request*/
 	XMapWindow(screen->dpy, event->window);
 }
@@ -506,24 +535,30 @@ void reparentWin(Window win)
 	Window parent_win=XCreateSimpleWindow(screen->dpy,screen->rootwin, attr.x, attr.y-20,attr.width, attr.height+20,1,BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
 	if(mode==1)
 	{
-		cursor_wins[cursor_length]=parent_win;
-		cursor_length++;
+		XChangeProperty(screen->dpy,parent_win,status,utf8_string, 8, PropModeReplace, 
+							(unsigned char*)"0", 1);		
+		XChangeProperty(screen->dpy,parent_win,tag_number,utf8_string,8, PropModeReplace, 
+							(unsigned char*)"0", 1);
+		addToCursorList(parent_win);
 		
 		Window cross_win=XCreateSimpleWindow(screen->dpy, parent_win,attr.width-20,0,20,20, 1, BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
 	/* we care when the cursor enters the window or when the window is pressed*/
 
 		XSelectInput(screen->dpy,parent_win, ButtonPressMask);
 		XSelectInput(screen->dpy,cross_win, EnterWindowMask | LeaveWindowMask | ButtonPressMask | ExposureMask);
-		XSetWindowAttributes attrs;
-		attrs.do_not_propagate_mask=ButtonPressMask;
-		XChangeWindowAttributes(screen->dpy,cross_win,CWDontPropagate,&attrs);
 		XMapWindow(screen->dpy, cross_win);
 
 	}else{
-		Win *parent=malloc(sizeof(Win));
-		parent->win=parent_win;
-		parent->font=font;
-		parent->scheme[0]=white;
+		Win parent;
+		parent.win=parent_win;
+		parent.font=font;
+		parent.scheme[0]=black;
+
+		XChangeProperty(screen->dpy,parent_win, status,utf8_string, 8,PropModeReplace, 
+							(unsigned char*)"master", 6);
+
+		addToCursorLessList(parent);
+		
 	}
 	XReparentWindow(screen->dpy,win,parent_win,0,20);
 
@@ -540,6 +575,19 @@ void switchToCursorless(XEvent *ev)
 	XClearWindow(screen->dpy,cursor_mode->win);
 	drawTextCenter(screen,cursorless_mode,"1");
 	drawTextCenter(screen,cursor_mode,"2");
+	/*unmapping cursor windows since we're now in cursorless mode*/
+
+	for(int i=0;i<cursor_length;i++)
+	{
+		XUnmapWindow(screen->dpy,cursor_wins[i]);
+	}
+	/*mapping cursorless wins*/
+
+	for(int i=0; i<cursorless_length;i++)
+	{
+		XMapWindow(screen->dpy,cursorless_wins[i].win);
+	}
+
 
 	XFlush(screen->dpy);
 }
@@ -554,6 +602,16 @@ void switchToCursor(XEvent *ev)
 
 	drawTextCenter(screen,cursorless_mode,"1");
 	drawTextCenter(screen,cursor_mode,"2");
+/*unmapping cursorless windows since we're now in cursor mode*/
+	for(int i=0; i<cursorless_length;i++)
+	{
+		XUnmapWindow(screen->dpy,cursorless_wins[i].win);
+	}
+/*mapping cursor windows*/
+	for(int i=0;i<cursor_length;i++)
+	{
+		XMapWindow(screen->dpy,cursor_wins[i]);
+	}
 
 	XFlush(screen->dpy);
 
@@ -566,11 +624,30 @@ void switchToSlave(XEvent *ev)
 {
 
 }
-void updateCursorLessList(Win *win)
+void tileWins()
+{
+	Win move_to_stack=cursorless_wins[cursorless_length-2];
+	XChangeProperty(screen->dpy, move_to_stack.win, status, utf8_string, 8, PropModeReplace,
+							(unsigned char *) "stack", 5);
+	/*number of windows in stack*/
+	int stack_num=cursorless_length-1;
+	
+	XWindowChanges attr;
+	attr.width=screen->s_width/2;
+	attr.height=(screen->s_height-20)/stack_num;
+	attr.x=screen->s_width/2;
+	for(int i=0; i<stack_num;i++)
+	{
+		attr.y=(stack_num-i-1)*attr.height+20;
+		
+		XConfigureWindow(screen->dpy,cursorless_wins[i].win, CWX | CWY | CWWidth | CWHeight, &attr);
+	}
+}
+void removeFromCursorLessList(Win *win)
 {
 
 } 
-void updateCursorList(Window win)
+void removeFromCursorList(Window win)
 {
 	int i=0;
 	for(i;i<cursor_length;i++)
