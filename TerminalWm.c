@@ -58,7 +58,9 @@ XButtonEvent start;
 /*colors*/
 XColor active_col;
 XColor bar_color;
-
+XColor par_col;
+XftColor white;
+XftColor black;
 /*Win related datas*/
 Win *cursorless_mode;//the bar
 Win *cursor_mode;//the bar
@@ -195,6 +197,10 @@ void init()
 	XAllocColor(screen->dpy, screen->cmap, &active_col);
 	XParseColor(screen->dpy, screen->cmap, bar_col, &bar_color);
 	XAllocColor(screen->dpy, screen->cmap,  &bar_color);
+	XParseColor(screen->dpy, screen->cmap, parent_col, &par_col);
+	XAllocColor(screen->dpy, screen->cmap,  &par_col);
+	xft_color_alloc(screen, &white, "#ffffff");
+	xft_color_alloc(screen, &black,"#000000");
 
 
 	checkOtherWM();
@@ -263,8 +269,6 @@ void eventloop()
 }
 void drawBar()
 {
-	XftColor foreground;
-	xft_color_alloc(screen, &foreground, "#ffffff");	
 	
 	Window bar=XCreateSimpleWindow(screen->dpy, 
 					screen->rootwin,0,0, screen->s_width, 20, 0, BlackPixel(screen->dpy, screen->screen_num),bar_color.pixel);
@@ -272,7 +276,7 @@ void drawBar()
 	Window cursorless_mode_win=XCreateSimpleWindow(screen->dpy, 
 					screen->rootwin,0,0,20,20, 0,BlackPixel(screen->dpy, screen->screen_num), mode? bar_color.pixel:active_col.pixel);
 	cursorless_mode->win=cursorless_mode_win;
-	cursorless_mode->scheme[Foreground]=foreground;
+	cursorless_mode->scheme[Foreground]=white;
 	cursorless_mode->font=font;
 	cursorless_mode->width=20;
 	cursorless_mode->height=20;
@@ -280,7 +284,7 @@ void drawBar()
 	cursor_mode=malloc(sizeof(Win));
 	Window cursor_mode_win=XCreateSimpleWindow(screen->dpy, screen->rootwin, 20,0,20,20,0,BlackPixel(screen->dpy, screen->screen_num), mode? active_col.pixel:bar_color.pixel);
 	cursor_mode->win=cursor_mode_win;
-	cursor_mode->scheme[Foreground]=foreground;
+	cursor_mode->scheme[Foreground]=white;
 	cursor_mode->font=font;
 	cursor_mode->width=20;
 	cursor_mode->height=20;
@@ -418,10 +422,7 @@ void keyPress(XEvent *ev)
 void leaveNotify(XEvent *ev)
 {
 	XCrossingEvent *event=&ev->xcrossing;
-	XColor new_bg;
-	XParseColor(screen->dpy,screen->cmap,parent_col, &new_bg);
-	XAllocColor(screen->dpy, screen->cmap,&new_bg);
-	XSetWindowBackground(screen->dpy,event->window, new_bg.pixel);
+	XSetWindowBackground(screen->dpy,event->window, par_col.pixel);
 
 }
 void mappingNotify(XEvent *ev)
@@ -485,20 +486,15 @@ void reparentWin(Window win)
 
 	XWindowAttributes attr;
 	XGetWindowAttributes(screen->dpy, win, &attr);
-	XColor background;
-	XftColor foreground;
 
-	XParseColor(screen->dpy, screen->cmap, parent_col,&background);
-	XAllocColor(screen->dpy, screen->cmap, &background);
-	xft_color_alloc(screen, &foreground, "#ffffff");
-	Window parent_win=XCreateSimpleWindow(screen->dpy,screen->rootwin, attr.x, attr.y-20,attr.width, attr.height+20,1,BlackPixel(screen->dpy, screen->screen_num),background.pixel);
+	Window parent_win=XCreateSimpleWindow(screen->dpy,screen->rootwin, attr.x, attr.y-20,attr.width, attr.height+20,1,BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
 
 	if(mode==1)
 	{
 		cursor_wins[cursor_length]=parent_win;
 		cursor_length++;
 		
-		Window cross_win=XCreateSimpleWindow(screen->dpy, parent_win,attr.width-20,0,20,20, 1, BlackPixel(screen->dpy, screen->screen_num),background.pixel);
+		Window cross_win=XCreateSimpleWindow(screen->dpy, parent_win,attr.width-20,0,20,20, 1, BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
 	/* we care when the cursor enters the window or when the window is pressed*/
 
 		XSelectInput(screen->dpy,cross_win, EnterWindowMask | LeaveWindowMask | ButtonPressMask | ExposureMask);
@@ -507,7 +503,7 @@ void reparentWin(Window win)
 		Win *parent=malloc(sizeof(Win));
 		parent->win=parent_win;
 		parent->font=font;
-		parent->scheme[0]=foreground;
+		parent->scheme[0]=white;
 	}
 	XReparentWindow(screen->dpy,win,parent_win,0,20);
 
