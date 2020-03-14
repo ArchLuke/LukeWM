@@ -522,17 +522,29 @@ void reparentWin(Window win)
 void switchToCursorless(XEvent *ev)
 {
 	mode=0;
+	XUnmapWindow(screen->dpy, cursor_mode->win);
+	XUnmapWindow(screen->dpy, cursorless_mode->win);
 	XSetWindowBackground(screen->dpy,cursorless_mode->win,active_col.pixel);
 	XSetWindowBackground(screen->dpy, cursor_mode->win, bar_color.pixel);
+	XMapWindow(screen->dpy, cursor_mode->win);
+	XMapWindow(screen->dpy, cursorless_mode->win);
+	drawTextCenter(screen,cursorless_mode,"1");
+	drawTextCenter(screen,cursor_mode,"2");
 
 	XFlush(screen->dpy);
 }
 void switchToCursor(XEvent *ev)
 {
 	mode=1;
-	XSetWindowBackground(screen->dpy,cursorless_mode->win,bar_color.pixel);
+	XUnmapWindow(screen->dpy, cursor_mode->win);
+	XUnmapWindow(screen->dpy, cursorless_mode->win);
+	XSetWindowBackground(screen->dpy,cursor_mode->win,active_col.pixel);
+	XSetWindowBackground(screen->dpy, cursorless_mode->win, bar_color.pixel);
+	XMapWindow(screen->dpy, cursor_mode->win);
+	XMapWindow(screen->dpy, cursorless_mode->win);
+	drawTextCenter(screen,cursorless_mode,"1");
+	drawTextCenter(screen,cursor_mode,"2");
 
-	XSetWindowBackground(screen->dpy, cursor_mode->win, active_col.pixel);
 	XFlush(screen->dpy);
 
 }
