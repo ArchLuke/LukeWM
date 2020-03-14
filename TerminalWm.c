@@ -168,17 +168,16 @@ void drawTextCenter(MyScreen *screen, Win *win, const char *text)
 	if(!win || !screen)
 		return;
 
-	XGlyphInfo *glyph=malloc(sizeof(XGlyphInfo));
+	XGlyphInfo glyph;
 	XftDraw *d= XftDrawCreate(screen->dpy, win->win,
 		                  DefaultVisual(screen->dpy, screen->screen_num),
 		                  screen->cmap);
 
-	XftTextExtentsUtf8(screen->dpy, win->font, (const FcChar8 *)text, strlen(text), glyph);
+	XftTextExtentsUtf8(screen->dpy, win->font, (const FcChar8 *)text, strlen(text), &glyph);
 	XftColor col=win->scheme[Foreground];
-	int width=(win->width-glyph->width)/2;
-	int height=(win->height-glyph->height)/2+glyph->height;
+	int width=(win->width-glyph.width)/2;
+	int height=(win->height-glyph.height)/2+glyph.height;
 	XftDrawStringUtf8(d,&col,win->font, width,height,( XftChar8 *)text, strlen(text));
-	//free(glyph);
 }
 void init()
 {
@@ -263,7 +262,6 @@ void createNotify(XEvent *ev)
 }
 void eventloop()
 {
-	XSetWindowBackground(screen->dpy, cursor_mode->win, WhitePixel(screen->dpy, screen->screen_num));
 	XEvent ev;
 	for(;;){
 		XNextEvent(screen->dpy, &ev);
@@ -335,11 +333,15 @@ void buttonPress(XEvent *ev)
 			Window parent;
 			Window *childwins;
 			int number;
+			printf("destroy start\n");
 /*getting and shutting down the reparenting window, which in turn shuts down the main window*/
 			XQueryTree(screen->dpy,event->window,&root,&parent,&childwins,&number);
+			printf("query finished\n");
 			if(parent)
 				XDestroyWindow(screen->dpy,parent);
+			printf("destroy finished\n");
 			updateCursorList(parent);
+			printf("update finished\n");
 		}
 	}
 }
@@ -387,45 +389,26 @@ void destroyWin(XEvent *ev)
 
 }
 void enterNotify(XEvent *ev)
-{/*
+{
 	XCrossingEvent *event=&ev->xcrossing;
-	XUnmapWindow(screen->dpy,event->window);
-	XSetWindowBackground(screen->dpy,event->window, WhitePixel(screen->dpy,screen->screen_num));
-	XMapWindow(screen->dpy, event->window);
-	Win *target=malloc(sizeof(Window));
-	target->win=event->window;
-	target->font=font;
-	target->width=20;
-	target->height=20;
-	target->scheme[Foreground]=black;
-//	drawTextCenter(screen, target,"X");*/
 
-	XFlush(screen->dpy);
+	XSetWindowBackground(screen->dpy,event->window, WhitePixel(screen->dpy,screen->screen_num));
+	XClearWindow(screen->dpy,event->window);
+	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),0,0,20,20);
+	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),20,0,0,20);
+
+//	XFlush(screen->dpy);
 	
 			
 }
 void expose(XEvent *ev)
 {
+	XExposeEvent *event=&ev->xexpose;
 	if(mode==1)
 	{
-		for(int i=0;i<cursor_length;i++)
-		{
-			Window rootwin;
-			Window parentwin;
-			Window *childwins;
-			int number;
-			XQueryTree(screen->dpy,cursor_wins[i],&rootwin, &parentwin, &childwins, &number);
-			Win *childwin;
-			childwin->win=childwins[0];	
-			childwin->font=font;
-			childwin->width=20;
-			childwin->height=20;
-			XftColor foreground;
-			xft_color_alloc(screen, &foreground, "#000000");
-			childwin->scheme[Foreground]=foreground;
-			XClearWindow(screen->dpy,childwin->win);
-			drawTextCenter(screen, childwin,"X");
-		}
+		XClearWindow(screen->dpy,event->window);
+		XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),0,0,20,20);
+		XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),20,0,0,20);
 	}	
 	
 }
@@ -436,7 +419,7 @@ void keyPress(XEvent *ev)
 {
 	XKeyEvent *event=&ev->xkey;
 	KeySym keysym = XKeycodeToKeysym(screen->dpy, (KeyCode)event->keycode, 0);
-	printf("%d\n",keysym);
+	printf("key called \n");
 	for (int i = 0; i < LENGTH(keys); i++)
 	{
 		if (keysym == keys[i].keysym
@@ -447,8 +430,15 @@ void keyPress(XEvent *ev)
 }
 void leaveNotify(XEvent *ev)
 {
-//	XCrossingEvent *event=&ev->xcrossing;
-//	XSetWindowBackground(screen->dpy,event->window, par_col.pixel);
+	XCrossingEvent *event=&ev->xcrossing;
+
+	XSetWindowBackground(screen->dpy,event->window, par_col.pixel);
+	XClearWindow(screen->dpy,event->window);
+	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),0,0,20,20);
+	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),20,0,0,20);
+
+//	free(target);
+//	XFlush(screen->dpy);
 
 }
 void mappingNotify(XEvent *ev)
@@ -538,18 +528,16 @@ void reparentWin(Window win)
 	XReparentWindow(screen->dpy,win,parent_win,0,20);
 
 	XMapWindow(screen->dpy, parent_win);
-
 			
 }
 void switchToCursorless(XEvent *ev)
 {
 	mode=0;
-	XUnmapWindow(screen->dpy, cursor_mode->win);
-	XUnmapWindow(screen->dpy, cursorless_mode->win);
+
 	XSetWindowBackground(screen->dpy,cursorless_mode->win,active_col.pixel);
 	XSetWindowBackground(screen->dpy, cursor_mode->win, bar_color.pixel);
-	XMapWindow(screen->dpy, cursor_mode->win);
-	XMapWindow(screen->dpy, cursorless_mode->win);
+	XClearWindow(screen->dpy,cursorless_mode->win);
+	XClearWindow(screen->dpy,cursor_mode->win);
 	drawTextCenter(screen,cursorless_mode,"1");
 	drawTextCenter(screen,cursor_mode,"2");
 
@@ -558,12 +546,12 @@ void switchToCursorless(XEvent *ev)
 void switchToCursor(XEvent *ev)
 {
 	mode=1;
-	XUnmapWindow(screen->dpy, cursor_mode->win);
-	XUnmapWindow(screen->dpy, cursorless_mode->win);
+
 	XSetWindowBackground(screen->dpy,cursor_mode->win,active_col.pixel);
 	XSetWindowBackground(screen->dpy, cursorless_mode->win, bar_color.pixel);
-	XMapWindow(screen->dpy, cursor_mode->win);
-	XMapWindow(screen->dpy, cursorless_mode->win);
+	XClearWindow(screen->dpy,cursorless_mode->win);
+	XClearWindow(screen->dpy,cursor_mode->win);
+
 	drawTextCenter(screen,cursorless_mode,"1");
 	drawTextCenter(screen,cursor_mode,"2");
 
