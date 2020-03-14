@@ -209,6 +209,8 @@ void init()
 	font=xft_font_alloc(screen, g_font);
 /*kinda not my problem if other apps use these key bindings*/
 
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x74), ShiftMask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
 	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x31), Mod1Mask,
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
 	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x32), Mod1Mask,
@@ -375,11 +377,10 @@ void configureNotify(XEvent *ev)
 }
 void createTerm(XEvent *ev)
 {
-
+	system("xterm&");
 }
 void destroyNotify(XEvent *ev)
 {
-	printf("destroyed\n");
 }
 void destroyWin(XEvent *ev)
 {
@@ -435,6 +436,7 @@ void keyPress(XEvent *ev)
 {
 	XKeyEvent *event=&ev->xkey;
 	KeySym keysym = XKeycodeToKeysym(screen->dpy, (KeyCode)event->keycode, 0);
+	printf("%d\n",keysym);
 	for (int i = 0; i < LENGTH(keys); i++)
 	{
 		if (keysym == keys[i].keysym
