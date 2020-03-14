@@ -69,7 +69,7 @@ int cursor_length=0;//number of entries in cursor_wins;
 Win **cursorless_wins;
 int cursorless_length=0;//number of entries in cursorless_wins;
 
-int mode;
+int mode=1;
 XftFont *font=NULL;
 /*function prototypes*/
 void init();
@@ -213,7 +213,9 @@ void init()
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
 	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x32), Mod1Mask,
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);
-	
+
+//	XGrabButton(screen->dpy, 1,None,screen->rootwin, True,
+  //          ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
 	XGrabButton(screen->dpy, 1, Mod1Mask,screen->rootwin, True,
             ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
     	XGrabButton(screen->dpy, 3, Mod1Mask,screen->rootwin, True,
@@ -302,12 +304,30 @@ void buttonPress(XEvent *ev)
 {
 	XButtonEvent *event=&ev->xbutton;
 	if(mode==1){
+		Window root;
+		Window parent;
+		Window *childwins;
+		int number;
+		XQueryTree(screen->dpy,event->window,&root,&parent,&childwins,&number);
 		if(event->subwindow != None)
         	{
-            		XGetWindowAttributes(screen->dpy, event->subwindow, &attr);
-            		start = *event;
+			/*raising and updating the pointer focus of the clicked window*/
+			XRaiseWindow(screen->dpy, event->subwindow);
+			XSetInputFocus(screen->dpy,event->subwindow,RevertToParent, CurrentTime);
+
+			if(event->state==MODEMASK)
+			{
+						
+            			XGetWindowAttributes(screen->dpy, event->subwindow, &attr);
+            			start = *event;
+			}
 			
-        	}else{
+        	}else if(number !=0){
+		/*handling normal clicking events*/
+	
+			XRaiseWindow(screen->dpy, event->window);
+			XSetInputFocus(screen->dpy,event->window, RevertToParent,CurrentTime);	
+		}else{
 		/*when the close button is pressed*/
 			Window root;
 			Window parent;
@@ -315,11 +335,9 @@ void buttonPress(XEvent *ev)
 			int number;
 /*getting and shutting down the reparenting window, which in turn shuts down the main window*/
 			XQueryTree(screen->dpy,event->window,&root,&parent,&childwins,&number);
-			printf("%d",number);	
 			if(parent)
 				XDestroyWindow(screen->dpy,parent);
 			updateCursorList(parent);
-			printf("called\n");
 		}
 	}
 }
@@ -494,7 +512,6 @@ void reparentWin(Window win)
 	XGetWindowAttributes(screen->dpy, win, &attr);
 
 	Window parent_win=XCreateSimpleWindow(screen->dpy,screen->rootwin, attr.x, attr.y-20,attr.width, attr.height+20,1,BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
-
 	if(mode==1)
 	{
 		cursor_wins[cursor_length]=parent_win;
@@ -503,8 +520,13 @@ void reparentWin(Window win)
 		Window cross_win=XCreateSimpleWindow(screen->dpy, parent_win,attr.width-20,0,20,20, 1, BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
 	/* we care when the cursor enters the window or when the window is pressed*/
 
+		XSelectInput(screen->dpy,parent_win, ButtonPressMask);
 		XSelectInput(screen->dpy,cross_win, EnterWindowMask | LeaveWindowMask | ButtonPressMask | ExposureMask);
+		XSetWindowAttributes attrs;
+		attrs.do_not_propagate_mask=ButtonPressMask;
+		XChangeWindowAttributes(screen->dpy,cross_win,CWDontPropagate,&attrs);
 		XMapWindow(screen->dpy, cross_win);
+
 	}else{
 		Win *parent=malloc(sizeof(Win));
 		parent->win=parent_win;
@@ -513,10 +535,6 @@ void reparentWin(Window win)
 	}
 	XReparentWindow(screen->dpy,win,parent_win,0,20);
 
-/*nd stopping the key bindings/cursor from affecting it. It is not the cleanest implementation I know. I will think of another way in the future*/
-	XSetWindowAttributes attrs;
-	attrs.do_not_propagate_mask=ButtonPressMask | KeyPressMask;
-	XChangeWindowAttributes(screen->dpy,win,CWDontPropagate,&attrs);
 	XMapWindow(screen->dpy, parent_win);
 
 			
