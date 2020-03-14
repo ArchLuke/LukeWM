@@ -314,8 +314,8 @@ void buttonPress(XEvent *ev)
 			Window *childwins;
 			int number;
 /*getting and shutting down the reparenting window, which in turn shuts down the main window*/
-	
 			XQueryTree(screen->dpy,event->window,&root,&parent,&childwins,&number);
+			printf("%d",number);	
 			if(parent)
 				XDestroyWindow(screen->dpy,parent);
 			updateCursorList(parent);
@@ -368,13 +368,19 @@ void destroyWin(XEvent *ev)
 
 }
 void enterNotify(XEvent *ev)
-{
-	printf("called enter\n");
+{/*
 	XCrossingEvent *event=&ev->xcrossing;
-	XColor new_bg;
-	XParseColor(screen->dpy,screen->cmap,"#FFFFFF", &new_bg);
-	XAllocColor(screen->dpy,screen->cmap,&new_bg);
+	XUnmapWindow(screen->dpy,event->window);
 	XSetWindowBackground(screen->dpy,event->window, WhitePixel(screen->dpy,screen->screen_num));
+	XMapWindow(screen->dpy, event->window);
+	Win *target=malloc(sizeof(Window));
+	target->win=event->window;
+	target->font=font;
+	target->width=20;
+	target->height=20;
+	target->scheme[Foreground]=black;
+//	drawTextCenter(screen, target,"X");*/
+
 	XFlush(screen->dpy);
 	
 			
@@ -421,8 +427,8 @@ void keyPress(XEvent *ev)
 }
 void leaveNotify(XEvent *ev)
 {
-	XCrossingEvent *event=&ev->xcrossing;
-	XSetWindowBackground(screen->dpy,event->window, par_col.pixel);
+//	XCrossingEvent *event=&ev->xcrossing;
+//	XSetWindowBackground(screen->dpy,event->window, par_col.pixel);
 
 }
 void mappingNotify(XEvent *ev)
