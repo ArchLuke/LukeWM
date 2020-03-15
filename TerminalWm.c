@@ -27,9 +27,7 @@ struct Win
 {
 	char name[5];
 	Window win;
-	int x,y;
 	int width, height;
-	GC gc;
 	XftColor scheme[2];
 	XftFont *font;
 	
@@ -62,7 +60,7 @@ Win *cursorless_mode;//the bar
 Win *cursor_mode;//the bar
 Window *cursor_wins;//This list will also be used for future features such as minimizing (using XA_WM_NAME)
 int cursor_length=0;//number of entries in cursor_wins;
-Win *cursorless_wins;
+Window *cursorless_wins;
 int cursorless_length=0;//number of entries in cursorless_wins;
 int mode=1;
 
@@ -91,7 +89,7 @@ static int (*xerrorxlib)(Display *, XErrorEvent *);
 static XftFont *xft_font_alloc(MyScreen *, const char *);
 void xft_color_alloc(MyScreen *, XftColor *, const char *);
 void addToCursorList(Window win);
-void addToCursorLessList(Win win);
+void addToCursorLessList(Window win);
 void drawRect(MyScreen *screen, Win *,GC, int, int, unsigned int, unsigned int, int);
 void drawTextCenter(MyScreen *, Win *, const char *);
 void buttonPress(XEvent *);
@@ -100,6 +98,7 @@ void configureRequest(XEvent *);
 void configureNotify(XEvent *);
 void createTerm(XEvent *);
 void createNotify(XEvent *);
+void destroyMaster();
 void destroyNotify(XEvent *);
 void destroyWin(XEvent *);
 void enterNotify(XEvent *);
@@ -110,14 +109,15 @@ void leaveNotify(XEvent *);
 void mappingNotify(XEvent *);
 void mapRequest(XEvent *);
 void motionNotify(XEvent *);
+void organizeCursorLessList();
 void reparentWin(Window);
 void switchToCursorless(XEvent *);
 void switchToCursor(XEvent *);
 void switchToMaster(XEvent *);
-void switchToSlave(XEvent *);
-void tileWins();
+void switchToStack(XEvent *);
+void tileStack();
 void removeFromCursorList(Window win);
-void removeFromCursorLessList(Win *win);
+void removeFromCursorLessList(Window win);
 void unmapNotify(XEvent *);
 #include "config.h"
 
@@ -194,7 +194,7 @@ void init()
 		
 	screen=malloc(sizeof(MyScreen));
 	cursor_wins=calloc(10, sizeof(Window));
-	cursorless_wins=calloc(10,sizeof(Win));
+	cursorless_wins=calloc(10,sizeof(Window));
 	screen->dpy=XOpenDisplay(NULL);
 	screen->screen_num=DefaultScreen(screen->dpy);
 	screen->rootwin=RootWindow(screen->dpy, screen->screen_num);
@@ -223,7 +223,13 @@ void init()
 	font=xft_font_alloc(screen, g_font);
 /*global root grabs*/
 
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x74), ShiftMask,
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x64), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x61), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x74), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x63), ShiftMask | Mod1Mask,
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
 	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x31), Mod1Mask,
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
@@ -319,7 +325,7 @@ void addToCursorList(Window win)
 	cursor_length ++;
 
 }
-void addToCursorLessList(Win win)
+void addToCursorLessList(Window win)
 {
 	cursorless_wins[cursorless_length]=win;
 	cursorless_length++;
@@ -411,10 +417,54 @@ void createTerm(XEvent *ev)
 }
 void destroyNotify(XEvent *ev)
 {
+
+}
+void destroyMaster()
+{
+	if(cursorless_length<2)
+		return;
+	Window new_master=cursorless_wins[cursorless_length-1];
+	/*giving the new master window a master property, as it was a stack window before*/
+
+	XChangeProperty(screen->dpy, new_master, status,utf8_string,8,
+							PropModeReplace,(unsigned char*) "master",6);
+	XWindowChanges attr;
+	attr.x=0;
+	attr.y=20;
+	attr.width=screen->s_width/2;
+	attr.height=(screen->s_height)-20;
+	XConfigureWindow(screen->dpy,new_master,CWX | CWY | CWWidth | CWHeight,&attr);
+	/*retile the stack as well*/
+
+	tileStack();		
+				
 }
 void destroyWin(XEvent *ev)
 {
+	if(mode==0)
+	{
+		XKeyEvent *event=&ev->xkey;
+		/*testing the status of the destroyed window, whether it is a master or a stack window*/
 
+		int di;
+		unsigned long dl;
+		unsigned char *p;
+		Atom da, atom;
+		XGetWindowProperty(screen->dpy, event->subwindow, status, 0L, sizeof atom, False, utf8_string,
+		&da, &di, &dl, &dl, &p);
+
+		XDestroyWindow(screen->dpy, event->subwindow);
+		/*remove the window from the list*/
+
+		removeFromCursorLessList(event->subwindow);
+
+		/*if it is a stack window, re-tile the stack windows*/
+
+		if(strcmp(p,"stack")==0)
+			tileStack();
+		else
+			destroyMaster();/*if it is a master window, destroy the current master window and bring a new one*/
+	}
 }
 void enterNotify(XEvent *ev)
 {
@@ -476,9 +526,9 @@ void mapRequest(XEvent *ev)
 	event=&ev->xmaprequest;
 /*reparenting with our own window, adding close buttons and etc.*/
 	reparentWin(event->window);
-	if(mode==0 && cursorless_length>1)
+	if(mode==0)
 	{
-		tileWins();
+		tileStack();
 	}
 /*allow the map request*/
 	XMapWindow(screen->dpy, event->window);
@@ -525,6 +575,37 @@ void motionNotify(XEvent *ev){
 		}
 	}
 }
+
+/*organizeCursorLessList makes sure that the master window is always on the top of the cursorless_wins list. Many functions would not work otherwise, as they assume the position of the master window in the list*/
+
+void organizeCursorLessList()
+{
+	int di;
+	unsigned long dl;
+	unsigned char *p;
+	Atom da, atom;
+	int i=0;
+
+	Window master_window;
+
+	/*looping through the list, testing which window is the master window*/
+	for(i;i<cursorless_length;i++)
+	{
+	
+		XGetWindowProperty(screen->dpy, cursorless_wins[i], status, 0L, sizeof atom, False, utf8_string,
+	&da, &di, &dl, &dl, &p);
+
+		if(strcmp("master",p)==0)
+		{
+			master_window=cursorless_wins[i];
+			break;
+		}
+	}
+	Window stack_window=cursorless_wins[cursorless_length-1];
+	cursorless_wins[i]=stack_window;
+	cursorless_wins[cursorless_length-1]=master_window;
+
+}
 void reparentWin(Window win)
 {
 /*Getting the attributes of win*/
@@ -549,15 +630,11 @@ void reparentWin(Window win)
 		XMapWindow(screen->dpy, cross_win);
 
 	}else{
-		Win parent;
-		parent.win=parent_win;
-		parent.font=font;
-		parent.scheme[0]=black;
 
 		XChangeProperty(screen->dpy,parent_win, status,utf8_string, 8,PropModeReplace, 
 							(unsigned char*)"master", 6);
 
-		addToCursorLessList(parent);
+		addToCursorLessList(parent_win);
 		
 	}
 	XReparentWindow(screen->dpy,win,parent_win,0,20);
@@ -585,7 +662,7 @@ void switchToCursorless(XEvent *ev)
 
 	for(int i=0; i<cursorless_length;i++)
 	{
-		XMapWindow(screen->dpy,cursorless_wins[i].win);
+		XMapWindow(screen->dpy,cursorless_wins[i]);
 	}
 
 
@@ -605,7 +682,7 @@ void switchToCursor(XEvent *ev)
 /*unmapping cursorless windows since we're now in cursor mode*/
 	for(int i=0; i<cursorless_length;i++)
 	{
-		XUnmapWindow(screen->dpy,cursorless_wins[i].win);
+		XUnmapWindow(screen->dpy,cursorless_wins[i]);
 	}
 /*mapping cursor windows*/
 	for(int i=0;i<cursor_length;i++)
@@ -618,16 +695,91 @@ void switchToCursor(XEvent *ev)
 }
 void switchToMaster(XEvent *ev)
 {
+/*first test if the window is already a master. If so, return*/
+
+	XKeyEvent *event=&ev->xkey;
+	int di;
+	unsigned long dl;
+	unsigned char *p;
+	Atom da, atom;
+	XGetWindowProperty(screen->dpy, event->subwindow, status, 0L, sizeof atom, False, utf8_string,
+	&da, &di, &dl, &dl, &p);
+	if(strcmp(p,"master")==0)
+		return;
+
+/*changing the old master window to a stack property*/
+
+	Window old_master=cursorless_wins[cursorless_length-1];
+	XChangeProperty(screen->dpy, old_master, status,utf8_string,8,
+							PropModeReplace,(unsigned char*) "stack",5);
+
+	Window new_master=event->subwindow;
+	XChangeProperty(screen->dpy, new_master, status,utf8_string,8,
+							PropModeReplace,(unsigned char*) "master",6);
+	XWindowChanges attr;
+	attr.x=0;
+	attr.y=20;
+	attr.width=screen->s_width/2;
+	attr.height=(screen->s_height)-20;
+	XConfigureWindow(screen->dpy,new_master,CWX | CWY | CWWidth | CWHeight,&attr);
+
+	/*reorganize the list after the structure has been messed up*/
+
+	organizeCursorLessList();
+
+/*re-tile the stack windows*/
+
+	tileStack();
+	
+}
+void switchToStack(XEvent *ev)
+{
+/*first test if the window is already a stack window. If so, return*/
+
+	XKeyEvent *event=&ev->xkey;
+	int di;
+	unsigned long dl;
+	unsigned char *p;
+	Atom da, atom;
+	XGetWindowProperty(screen->dpy, event->subwindow, status, 0L, sizeof atom, False, utf8_string,
+	&da, &di, &dl, &dl, &p);
+	if(strcmp(p,"stack")==0)
+		return;
+
+
+/*changing the old master window to a stack property*/
+
+	Window old_stack=cursorless_wins[cursorless_length-2];
+	XChangeProperty(screen->dpy, old_stack, status,utf8_string,8,
+							PropModeReplace,(unsigned char*) "master",6);
+
+	Window new_stack=event->subwindow;
+	XChangeProperty(screen->dpy, new_stack, status,utf8_string,8,
+							PropModeReplace,(unsigned char*) "stack",5);
+	XWindowChanges attr;
+	attr.x=0;
+	attr.y=20;
+	attr.width=screen->s_width/2;
+	attr.height=(screen->s_height)-20;
+	XConfigureWindow(screen->dpy,old_stack,CWX | CWY | CWWidth | CWHeight,&attr);
+
+	/*reorganize the list after the structure has been messed up*/
+
+	organizeCursorLessList();
+
+/*re-tile the stack windows*/
+
+	tileStack();
 
 }
-void switchToSlave(XEvent *ev)
+void tileStack()
 {
+	if(cursorless_length<2)
+		return;
+/*observe that the next two lines do nothing unless tileStack is invoked by mapRequest()*/
 
-}
-void tileWins()
-{
-	Win move_to_stack=cursorless_wins[cursorless_length-2];
-	XChangeProperty(screen->dpy, move_to_stack.win, status, utf8_string, 8, PropModeReplace,
+	Window move_to_stack=cursorless_wins[cursorless_length-2];
+	XChangeProperty(screen->dpy, move_to_stack, status, utf8_string, 8, PropModeReplace,
 							(unsigned char *) "stack", 5);
 	/*number of windows in stack*/
 	int stack_num=cursorless_length-1;
@@ -640,11 +792,23 @@ void tileWins()
 	{
 		attr.y=(stack_num-i-1)*attr.height+20;
 		
-		XConfigureWindow(screen->dpy,cursorless_wins[i].win, CWX | CWY | CWWidth | CWHeight, &attr);
+		XConfigureWindow(screen->dpy,cursorless_wins[i], CWX | CWY | CWWidth | CWHeight, &attr);
 	}
 }
-void removeFromCursorLessList(Win *win)
+void removeFromCursorLessList(Window win)
 {
+	int i=0;
+	for(i;i<cursorless_length;i++)
+	{
+		if(cursorless_wins[i]==win)
+			break;
+	}
+	for(i;i<cursorless_length-1;i++)
+	{
+		cursorless_wins[i]=cursorless_wins[i+1];
+	}
+	
+	cursorless_length --;
 
 } 
 void removeFromCursorList(Window win)
@@ -659,7 +823,6 @@ void removeFromCursorList(Window win)
 	{
 		cursor_wins[i]=cursor_wins[i+1];
 	}
-	cursor_wins[i+1]=None;
 	cursor_length --;
 }		
 void unmapNotify(XEvent *ev)
