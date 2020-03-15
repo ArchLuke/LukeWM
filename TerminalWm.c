@@ -65,7 +65,6 @@ int cursorless_length=0;//number of entries in cursorless_wins;
 int mode=1;
 
 /*atoms*/
-
 Atom utf8_string;
 /*
 I made status of type Atom for POTENTIAL future inter-client communications. 
@@ -140,7 +139,7 @@ void addToCursorLessList(Window win)
 }
 void drawBar()
 {
-	
+	/*draw the bar*/
 	Window bar=XCreateSimpleWindow(screen->dpy, 
 					screen->rootwin,0,0, screen->s_width, 20, 0, BlackPixel(screen->dpy, screen->screen_num),bar_color.pixel);
 	cursorless_mode=malloc(sizeof(Win));
@@ -176,11 +175,15 @@ void drawTextCenter(MyScreen *screen, Win *win, const char *text)
 	XftDraw *d= XftDrawCreate(screen->dpy, win->win,
 		                  DefaultVisual(screen->dpy, screen->screen_num),
 		                  screen->cmap);
-
+/*The text extents of a text measures the attributes of the bounding box.
+Visit https://www.freetype.org/freetype2/docs/glyphs/glyphs-3.html to learn about glyph metrics*/
 	XftTextExtentsUtf8(screen->dpy, win->font, (const FcChar8 *)text, strlen(text), &glyph);
 	XftColor col=win->scheme[Foreground];
+
 	int width=(win->width-glyph.width)/2;
 	int height=(win->height-glyph.height)/2+glyph.height;
+/*The XftDrawStringUtf8 is a pain in the ass. Note that (x,y) measures NOT the top left corner but the bottom left.
+ This is counter-intuitive but also never mentioned in the manual*/
 	XftDrawStringUtf8(d,&col,win->font, width,height,( XftChar8 *)text, strlen(text));
 }
 void buttonPress(XEvent *ev)
@@ -235,6 +238,7 @@ void buttonRelease(XEvent *ev)
 
 void checkOtherWM()
 {
+/*If another wm is already running. A SubstructureRedirect request will fail*/
 	XSetErrorHandler(wmError);	
 	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask);
 	XSync(screen->dpy, False);
@@ -332,7 +336,7 @@ void destroyWin(XEvent *ev)
 void enterNotify(XEvent *ev)
 {
 	XCrossingEvent *event=&ev->xcrossing;
-
+/*changing the background color if hovered*/
 	XSetWindowBackground(screen->dpy,event->window, WhitePixel(screen->dpy,screen->screen_num));
 	XClearWindow(screen->dpy,event->window);
 	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),0,0,20,20);
@@ -351,6 +355,7 @@ void eventloop()
 void expose(XEvent *ev)
 {
 	XExposeEvent *event=&ev->xexpose;
+/*Interestingly enough, the only drawn elements that are subject to expose events are the close buttons*/
 	if(mode==1)
 	{
 		XClearWindow(screen->dpy,event->window);
@@ -449,6 +454,7 @@ void mapRequest(XEvent *ev)
 	reparentWin(event->window);
 	if(mode==0)
 	{
+/*if the window is created in cursorless mode, we need to reorganize the windows in the stack mode*/
 		tileStack();
 	}
 /*allow the map request*/
@@ -467,7 +473,7 @@ void motionNotify(XEvent *ev){
 		{
 			xdiff = (event->x_root) - (start.x_root);
 			ydiff = (event->y_root) - (start.y_root);
-			
+			/*the next 8 lines make sure that the window stays within boundary*/
 			new_x=MAX((attr.x + (start.button==1 ? xdiff : 0)),0); /*left boundary*/
 			new_x=MIN((screen->s_width-attr.width),new_x);/*right boundary*/
 			new_y=MAX((attr.y + (start.button==1 ? ydiff : 0)),(showbar?20:0));/*upper bound*/
@@ -484,7 +490,7 @@ void motionNotify(XEvent *ev){
 				new_width,
 				new_height);
 
-			/*resizing childwins*/
+			/*resizing childwins, i.e.the cross button and the actual content window*/
 
 			Window *childwin;
 			Window parentWin;
@@ -501,6 +507,7 @@ void moveLeft(XEvent *ev)
 	XKeyEvent *event=&ev->xkey;
 	Window old_focus;
 	int state;
+/*obtain the current input focus. We will decide the new input focus based on the current one*/
 	XGetInputFocus(screen->dpy,&old_focus,&state);
 
 	Window *focus;
@@ -510,6 +517,7 @@ void moveLeft(XEvent *ev)
 	int number;
 
 	int i=0;
+/*the following for loop solves for the index of old_focus in the list.*/
 	for(i = 0; i < cursorless_length; i++)
 	{
 		XQueryTree(screen->dpy, cursorless_wins[i],&rootwin,&parentWin,&focus,&number);
@@ -552,7 +560,8 @@ void moveRight(XEvent *ev)
 	XSetInputFocus(screen->dpy,*focus,RevertToPointerRoot, CurrentTime);
 
 }
-/*organizeCursorLessList makes sure that the master window is always on the top of the cursorless_wins list. Many functions would not work otherwise, as they assume the position of the master window in the list*/
+/*organizeCursorLessList makes sure that the master window is always on the top of the cursorless_wins list. 
+Many functions would not work otherwise, as they assume the position of the master window in the list*/
 
 void organizeCursorLessList()
 {
@@ -578,6 +587,7 @@ void organizeCursorLessList()
 		}
 	}
 	Window stack_window=cursorless_wins[cursorless_length-1];
+/*swapping the windows' locations*/
 	cursorless_wins[i]=stack_window;
 	cursorless_wins[cursorless_length-1]=master_window;
 
@@ -592,19 +602,20 @@ void reparentWin(Window win)
 	Window parent_win=XCreateSimpleWindow(screen->dpy,screen->rootwin, attr.x, attr.y-20,attr.width, attr.height+20,1,BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
 	if(mode==1)
 	{
+	/*if the window is created in cursor mode, the master stack status of the window is 0, i.e. it does not aply*/
 		XChangeProperty(screen->dpy,parent_win,status,utf8_string, 8, PropModeReplace, 
 							(unsigned char*)"0", 1);		
 		addToCursorList(parent_win);
 		
 		Window cross_win=XCreateSimpleWindow(screen->dpy, parent_win,attr.width-20,0,20,20, 1, BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
-	/* we care when the cursor enters the window or when the window is pressed*/
 
 		XSelectInput(screen->dpy,parent_win, ButtonPressMask);
+	/* we care when the cursor enters the window or when the window is pressed*/
 		XSelectInput(screen->dpy,cross_win, EnterWindowMask | LeaveWindowMask | ButtonPressMask | ExposureMask);
 		XMapWindow(screen->dpy, cross_win);
 
 	}else{
-
+		/*any window that has just been created is put in the master pane*/
 		XChangeProperty(screen->dpy,parent_win, status,utf8_string, 8,PropModeReplace, 
 							(unsigned char*)"master", 6);
 
@@ -621,6 +632,8 @@ void switchToCursor(XEvent *ev)
 	mode=1;
 	if(showbar)
 	{
+/*XSetWindowBackground works in an intriguing way. It doesn't actually change the background color when called. 
+I was stuck on this for a very long time, until someone helped me through a forum. The function only changes future requests. The change is only applied when the window is cleared or redrawn. */
 		XSetWindowBackground(screen->dpy,cursor_mode->win,active_col.pixel);
 		XSetWindowBackground(screen->dpy, cursorless_mode->win, bar_color.pixel);
 		XClearWindow(screen->dpy,cursorless_mode->win);
@@ -689,10 +702,11 @@ void switchToMaster(XEvent *ev)
 	Window old_master=cursorless_wins[cursorless_length-1];
 	XChangeProperty(screen->dpy, old_master, status,utf8_string,8,
 							PropModeReplace,(unsigned char*) "stack",5);
-
+/*the window that is pressed is now the new master window*/
 	Window new_master=event->subwindow;
 	XChangeProperty(screen->dpy, new_master, status,utf8_string,8,
 							PropModeReplace,(unsigned char*) "master",6);
+/*configuring the attributes of the new master window*/
 	XWindowChanges attr;
 	attr.x=0;
 	attr.y=(showbar?20:0);
@@ -716,20 +730,22 @@ void switchToStack(XEvent *ev)
 	unsigned long dl;
 	unsigned char *p;
 	Atom da, atom;
+	/*the XGetWindowProperty retrieves the property of a window using atoms. Note that neither di, dl,da, nor atom is used, but they are required parameters for the function*/
 	XGetWindowProperty(screen->dpy, event->subwindow, status, 0L, sizeof atom, False, utf8_string,
 	&da, &di, &dl, &dl, &p);
+	/*if the retrieved property value is "stack", return*/
 	if(strcmp(p,"stack")==0)
 		return;
 
-/*changing the old master window to a stack property*/
-
+/*changing the old stack window to a master property*/
 	Window old_stack=cursorless_wins[cursorless_length-2];
 	XChangeProperty(screen->dpy, old_stack, status,utf8_string,8,
 							PropModeReplace,(unsigned char*) "master",6);
-
+/*the window that is pressed is now a stack window*/
 	Window new_stack=event->subwindow;
 	XChangeProperty(screen->dpy, new_stack, status,utf8_string,8,
 							PropModeReplace,(unsigned char*) "stack",5);
+/*configuring the attributes of the new master window*/
 	XWindowChanges attr;
 	attr.x=0;
 	attr.y=(showbar?20:0);
@@ -762,6 +778,7 @@ void tileStack()
 	attr.x=screen->s_width/2;
 	for(int i=0; i<stack_num;i++)
 	{
+		/*only the y attribute varies for stack windows*/
 		attr.y=(stack_num-i-1)*attr.height+(showbar?20:0);		
 		XConfigureWindow(screen->dpy,cursorless_wins[i], CWX | CWY | CWWidth | CWHeight, &attr);
 	}
@@ -769,21 +786,24 @@ void tileStack()
 void removeFromCursorLessList(Window win)
 {
 	int i=0;
+	/*solving for the index of the window in the list*/
 	for(i;i<cursorless_length;i++)
 	{
 		if(cursorless_wins[i]==win)
 			break;
 	}
+	/*since the entry at i is null now, move every entry after i one index forward*/
 	for(i;i<cursorless_length-1;i++)
 	{
 		cursorless_wins[i]=cursorless_wins[i+1];
 	}
-	
+	/*notice we never actually empty index i+1. Decrementing the cursorless_length variable is enough*/
 	cursorless_length --;
 
 } 
 void removeFromCursorList(Window win)
 {
+	/*removeFromCursorList follows the same algorithm as removeFromCursorLessList*/
 	int i=0;
 	for(i;i<cursor_length;i++)
 	{
@@ -823,7 +843,7 @@ void xft_color_alloc(MyScreen *screen, XftColor *color, const char *colorName)
 {
 	if (!screen || !color || !colorName)
 		return;
-
+	/*XftColorAllocName requires a visual type and a colormap. The visual and colormap differs slightly. Visuals specify the supported depths, while colormap specifies the mapping of a monitor from pixels to RGB values*/
 	if (!XftColorAllocName(screen->dpy, DefaultVisual(screen->dpy, screen->screen_num),
 	                       screen->cmap,
 	                       colorName, color))
@@ -833,7 +853,7 @@ void xft_color_alloc(MyScreen *screen, XftColor *color, const char *colorName)
 static XftFont *xft_font_alloc(MyScreen *screen, const char *fontname)
 {
 	XftFont *font = NULL;
-
+	/*the Xft library supports many ways of etablishing the FCPattern attribute of XftFont struct, among thes include passing a FCPattern struct or string. Here, however, we're choosing to pass a FontConfig string*/
 	if (fontname && screen) {
 			if (!(font = XftFontOpenName(screen->dpy, screen->screen_num, fontname))) {
 			fprintf(stderr, "error with name '%s'\n", fontname);
