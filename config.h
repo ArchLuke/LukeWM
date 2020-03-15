@@ -1,7 +1,6 @@
 /*appearances*/
 static const int showbar=1;/*show bar or not*/
-static const int topbar=1;/*location of bar*/
-static const int cursor=1;/*cursor style for the reparenting mode*/
+static const int cursor=XC_left_tee;/*cursor style for the reparenting mode*/
 static const char *g_font="monospace:size=10";
 static const char *active_mode_col="#005577";/*color indicating the currently active bar mode*/
 static const char *bar_col="#666666";/*color of bar*/

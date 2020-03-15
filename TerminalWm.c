@@ -5,12 +5,13 @@
 #include <X11/keysym.h>
 #include <X11/Xft/Xft.h>
 #include <X11/Xproto.h>
+#include <X11/cursorfont.h>
+
 /*macros*/
 #define LENGTH(X) (sizeof X/ sizeof X[0])
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a,b)  ((a)<(b)?(a):(b));
 /*data types*/
-
 
 typedef struct MyScreen MyScreen;
 typedef struct Win Win;
@@ -36,10 +37,9 @@ struct Key
 {
 	unsigned int mod;//key mask
 	KeySym keysym;//key sym
-	void (*func)(XEvent *);//array designated intializers
+	void (*func)(XEvent *);//function for each key
 };
 enum {Foreground, Background};
-
 
 MyScreen *screen;
 
@@ -76,50 +76,43 @@ Atom status;/*the master/stack status of a window
 The number is 0 if the window is in cursor mode*/
 
 /*function prototypes*/
-void init();
-void eventLoop();
-void checkOtherWM();
-int wmError(Display *, XErrorEvent *);
-void drawBar();
-int xerror(Display *, XErrorEvent *);
-static int (*xerrorxlib)(Display *, XErrorEvent *);
 
-static XftFont *xft_font_alloc(MyScreen *, const char *);
-void xft_color_alloc(MyScreen *, XftColor *, const char *);
-void addToCursorList(Window win);
 void addToCursorLessList(Window win);
-void drawRect(MyScreen *screen, Win *,GC, int, int, unsigned int, unsigned int, int);
+void addToCursorList(Window win);
+void drawBar();
 void drawTextCenter(MyScreen *, Win *, const char *);
 void buttonPress(XEvent *);
 void buttonRelease(XEvent *);
+void checkOtherWM();
 void configureRequest(XEvent *);
-void configureNotify(XEvent *);
 void createTerm(XEvent *);
-void createNotify(XEvent *);
+void defineCursor(Window win);
 void destroyMaster();
-void destroyNotify(XEvent *);
 void destroyWin(XEvent *);
-void drawTags();
 void enterNotify(XEvent *);
+void eventLoop();
 void expose(XEvent *);
-void focusIn(XEvent *);
+void init();
 void keyPress(XEvent *);
 void leaveNotify(XEvent *);
-void mappingNotify(XEvent *);
 void mapRequest(XEvent *);
 void motionNotify(XEvent *);
 void moveLeft(XEvent *);
 void moveRight(XEvent *);
 void organizeCursorLessList();
 void reparentWin(Window);
-void switchToCursorless(XEvent *);
 void switchToCursor(XEvent *);
+void switchToCursorless(XEvent *);
 void switchToMaster(XEvent *);
 void switchToStack(XEvent *);
 void tileStack();
 void removeFromCursorList(Window win);
 void removeFromCursorLessList(Window win);
-void unmapNotify(XEvent *);
+int wmError(Display *, XErrorEvent *);
+int xerror(Display *, XErrorEvent *);
+static int (*xerrorxlib)(Display *, XErrorEvent *);
+void xft_color_alloc(MyScreen *, XftColor *, const char *);
+static XftFont *xft_font_alloc(MyScreen *, const char *);
 #include "config.h"
 
 /*function designated array initializer*/
@@ -127,170 +120,23 @@ static void (*handler[LASTEvent]) (XEvent *) = {
 	[ButtonPress] = buttonPress,
 	[ButtonRelease]=buttonRelease,
 	[ConfigureRequest] = configureRequest,
-	[ConfigureNotify] = configureNotify,
-	[CreateNotify]=createNotify,
-	[DestroyNotify] = destroyNotify,
 	[EnterNotify] = enterNotify,
 	[LeaveNotify] = leaveNotify,
 	[Expose] = expose,
-	[FocusIn] = focusIn,
 	[KeyPress] = keyPress,
-	[MappingNotify] = mappingNotify,
 	[MapRequest] = mapRequest,
-	[MotionNotify] = motionNotify,
-	[UnmapNotify] = unmapNotify
+	[MotionNotify] = motionNotify
 };
-static XftFont *
-xft_font_alloc(MyScreen *screen, const char *fontname)
+void addToCursorList(Window win)
 {
-	XftFont *font = NULL;
-
-	if (fontname && screen) {
-			if (!(font = XftFontOpenName(screen->dpy, screen->screen_num, fontname))) {
-			fprintf(stderr, "error with name '%s'\n", fontname);
-			return NULL;
-		}
-	}
-	return font;
-}
-void
-xft_color_alloc(MyScreen *screen, XftColor *color, const char *colorName)
-{
-	if (!screen || !color || !colorName)
-		return;
-
-	if (!XftColorAllocName(screen->dpy, DefaultVisual(screen->dpy, screen->screen_num),
-	                       screen->cmap,
-	                       colorName, color))
-		fprintf(stderr,"error, cannot allocate color '%s'", colorName);
-}
-void
-drawRect(MyScreen *screen, Win *win,GC gc, int x, int y, unsigned int w, unsigned int h, int filled)
-{
-	if (!win)
-		return;
-	if (filled)
-		XFillRectangle(screen->dpy, win->win, gc, x, y, w, h);
-	else
-		XDrawRectangle(screen->dpy, win->win, gc, x, y, w - 1, h - 1);
-}
-void drawTextCenter(MyScreen *screen, Win *win, const char *text)
-{
-	if(!win || !screen)
-		return;
-
-	XGlyphInfo glyph;
-	XftDraw *d= XftDrawCreate(screen->dpy, win->win,
-		                  DefaultVisual(screen->dpy, screen->screen_num),
-		                  screen->cmap);
-
-	XftTextExtentsUtf8(screen->dpy, win->font, (const FcChar8 *)text, strlen(text), &glyph);
-	XftColor col=win->scheme[Foreground];
-	int width=(win->width-glyph.width)/2;
-	int height=(win->height-glyph.height)/2+glyph.height;
-	XftDrawStringUtf8(d,&col,win->font, width,height,( XftChar8 *)text, strlen(text));
-}
-void init()
-{
-		
-	screen=malloc(sizeof(MyScreen));
-	cursor_wins=calloc(10, sizeof(Window));
-	cursorless_wins=calloc(10,sizeof(Window));
-	screen->dpy=XOpenDisplay(NULL);
-	screen->screen_num=DefaultScreen(screen->dpy);
-	screen->rootwin=RootWindow(screen->dpy, screen->screen_num);
-	screen->s_width=DisplayWidth(screen->dpy, screen->screen_num);
-	screen->s_height=DisplayHeight(screen->dpy, screen->screen_num);
-	screen->cmap = DefaultColormap(screen->dpy, screen->screen_num);
-
-	XParseColor(screen->dpy, screen->cmap, active_mode_col, &active_col);
-	XAllocColor(screen->dpy, screen->cmap, &active_col);
-	XParseColor(screen->dpy, screen->cmap, bar_col, &bar_color);
-	XAllocColor(screen->dpy, screen->cmap,  &bar_color);
-	XParseColor(screen->dpy, screen->cmap, parent_col, &par_col);
-	XAllocColor(screen->dpy, screen->cmap,  &par_col);
-	xft_color_alloc(screen, &white, "#ffffff");
-	xft_color_alloc(screen, &black,"#000000");
-
-/*global atoms initialization*/
-	utf8_string=XInternAtom(screen->dpy,"UTF8_STRING", False);
-	status=XInternAtom(screen->dpy, "status", False);
-	
-	checkOtherWM();
-/*the gut of the wm*/
-	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask|ExposureMask);
-	
-	font=xft_font_alloc(screen, g_font);
-/*global root grabs*/
-
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x73), ShiftMask | Mod1Mask,
-            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x64), ShiftMask | Mod1Mask,
-            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x66), ShiftMask | Mod1Mask,
-            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x61), ShiftMask | Mod1Mask,
-            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x74), ShiftMask | Mod1Mask,
-            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x63), ShiftMask | Mod1Mask,
-            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x31), Mod1Mask,
-            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
-	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x32), Mod1Mask,
-            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
-
-	XGrabButton(screen->dpy, 1, Mod1Mask,screen->rootwin, True,
-            ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
-    	XGrabButton(screen->dpy, 3, Mod1Mask,screen->rootwin, True,
-            ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
-
-	drawBar();	
-}
-void checkOtherWM()
-{
-	XSetErrorHandler(wmError);	
-	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask);
-	XSync(screen->dpy, False);
-	XSetErrorHandler(xerror);
-}
-int xerror(Display *dpy, XErrorEvent *ee)
-{
-	if (ee->error_code == BadWindow
-	|| (ee->request_code == X_SetInputFocus && ee->error_code == BadMatch)
-	|| (ee->request_code == X_PolyText8 && ee->error_code == BadDrawable)
-	|| (ee->request_code == X_PolyFillRectangle && ee->error_code == BadDrawable)
-	|| (ee->request_code == X_PolySegment && ee->error_code == BadDrawable)
-	|| (ee->request_code == X_ConfigureWindow && ee->error_code == BadMatch)
-	|| (ee->request_code == X_GrabButton && ee->error_code == BadAccess)
-	|| (ee->request_code == X_GrabKey && ee->error_code == BadAccess)
-	|| (ee->request_code == X_CopyArea && ee->error_code == BadDrawable))
-		return 0;
-	fprintf(stderr, "fatal error: request code=%d, error code=%d\n",
-		ee->request_code, ee->error_code);
-	return xerrorxlib(dpy, ee); 
-}
-
-int wmError(Display *dpy, XErrorEvent *ev)
-{
-	fprintf(stderr, "another wm is already running");
-	exit(1);
-	return -1;
-}
-void createNotify(XEvent *ev)
-{
-
-/*nothing for the wm to do with a CreateNotify event */
+	cursor_wins[cursor_length]=win;
+	cursor_length ++;
 
 }
-void eventloop()
+void addToCursorLessList(Window win)
 {
-	XEvent ev;
-	for(;;){
-		XNextEvent(screen->dpy, &ev);
-		if(handler[ev.type])
-			handler[ev.type](&ev);
-	}
+	cursorless_wins[cursorless_length]=win;
+	cursorless_length++;
 }
 void drawBar()
 {
@@ -318,21 +164,24 @@ void drawBar()
 	XMapWindow(screen->dpy, cursorless_mode->win);
 	XMapWindow(screen->dpy, cursor_mode->win);
 	drawTextCenter(screen,cursorless_mode,"1");
-	drawTextCenter(screen,cursor_mode,"2");
-
-	
+	drawTextCenter(screen,cursor_mode,"2");	
 	
 }
-void addToCursorList(Window win)
+void drawTextCenter(MyScreen *screen, Win *win, const char *text)
 {
-	cursor_wins[cursor_length]=win;
-	cursor_length ++;
+	if(!win || !screen)
+		return;
 
-}
-void addToCursorLessList(Window win)
-{
-	cursorless_wins[cursorless_length]=win;
-	cursorless_length++;
+	XGlyphInfo glyph;
+	XftDraw *d= XftDrawCreate(screen->dpy, win->win,
+		                  DefaultVisual(screen->dpy, screen->screen_num),
+		                  screen->cmap);
+
+	XftTextExtentsUtf8(screen->dpy, win->font, (const FcChar8 *)text, strlen(text), &glyph);
+	XftColor col=win->scheme[Foreground];
+	int width=(win->width-glyph.width)/2;
+	int height=(win->height-glyph.height)/2+glyph.height;
+	XftDrawStringUtf8(d,&col,win->font, width,height,( XftChar8 *)text, strlen(text));
 }
 void buttonPress(XEvent *ev)
 {
@@ -383,6 +232,16 @@ void buttonRelease(XEvent *ev)
 		start.subwindow=None;		
 
 }
+
+void checkOtherWM()
+{
+	XSetErrorHandler(wmError);	
+	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask);
+	XSync(screen->dpy, False);
+	XSetErrorHandler(xerror);
+}
+
+
 void configureRequest(XEvent *ev)
 {
 	
@@ -393,7 +252,7 @@ void configureRequest(XEvent *ev)
   // Copy fields from event to changes.
 	changes.x = event->x;
 //making sure the window does not go out of bounds
-	changes.y = ((event->y)>40)?(event->y):40;
+	changes.y = ((event->y)>(showbar?40:20))?(event->y):(showbar?40:20);
 	if(mode==1)
 	{
 		changes.width = event->width;
@@ -401,9 +260,9 @@ void configureRequest(XEvent *ev)
 	}else{
 		/*master pane attributes*/
 		changes.x=0;
-		changes.y=40;
+		changes.y=(showbar?40:20);
 		changes.width=screen->s_width/2;
-		changes.height=screen->s_height-40;
+		changes.height=screen->s_height-(showbar?40:20);
 	}
 	changes.border_width = event->border_width;
 	changes.sibling = event->above;
@@ -411,22 +270,23 @@ void configureRequest(XEvent *ev)
  	
 	XConfigureWindow(screen->dpy, event->window,CWX | CWY | CWWidth | CWHeight, &changes);
 }
-void configureNotify(XEvent *ev)
-{
-/*nothing for the wm to do*/
-}
+
 void createTerm(XEvent *ev)
 {
 	system("xterm&");
 }
-void destroyNotify(XEvent *ev)
+
+void defineCursor(Window win)
 {
-/*nothing for the wm to do*/
+	Cursor cur=XCreateFontCursor(screen->dpy,cursor);
+	XDefineCursor(screen->dpy,win,cur);
 }
+
 void destroyMaster()
 {
 	if(cursorless_length<2)
 		return;
+
 	Window new_master=cursorless_wins[cursorless_length-1];
 	/*giving the new master window a master property, as it was a stack window before*/
 
@@ -434,9 +294,9 @@ void destroyMaster()
 							PropModeReplace,(unsigned char*) "master",6);
 	XWindowChanges attr;
 	attr.x=0;
-	attr.y=20;
+	attr.y=(showbar?20:0);
 	attr.width=screen->s_width/2;
-	attr.height=(screen->s_height)-20;
+	attr.height=(screen->s_height)-(showbar?20:0);
 	XConfigureWindow(screen->dpy,new_master,CWX | CWY | CWWidth | CWHeight,&attr);
 	/*retile the stack as well*/
 
@@ -461,7 +321,6 @@ void destroyWin(XEvent *ev)
 		/*remove the window from the list*/
 
 		removeFromCursorLessList(event->subwindow);
-
 		/*if it is a stack window, re-tile the stack windows*/
 
 		if(strcmp(p,"stack")==0)
@@ -469,10 +328,6 @@ void destroyWin(XEvent *ev)
 		else
 			destroyMaster();/*if it is a master window, destroy the current master window and bring a new one*/
 	}
-}
-void drawTags()
-{
-	
 }
 void enterNotify(XEvent *ev)
 {
@@ -483,9 +338,15 @@ void enterNotify(XEvent *ev)
 	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),0,0,20,20);
 	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),20,0,0,20);
 
-//	XFlush(screen->dpy);
-	
-			
+}
+void eventloop()
+{
+	XEvent ev;
+	for(;;){
+		XNextEvent(screen->dpy, &ev);
+		if(handler[ev.type])
+			handler[ev.type](&ev);
+	}
 }
 void expose(XEvent *ev)
 {
@@ -498,10 +359,66 @@ void expose(XEvent *ev)
 	}	
 	
 }
-void focusIn(XEvent *ev)
+
+void init()
 {
-/*nothing for the wm to do*/
+		
+	screen=malloc(sizeof(MyScreen));
+	cursor_wins=calloc(10, sizeof(Window));
+	cursorless_wins=calloc(10,sizeof(Window));
+	screen->dpy=XOpenDisplay(NULL);
+	screen->screen_num=DefaultScreen(screen->dpy);
+	screen->rootwin=RootWindow(screen->dpy, screen->screen_num);
+	screen->s_width=DisplayWidth(screen->dpy, screen->screen_num);
+	screen->s_height=DisplayHeight(screen->dpy, screen->screen_num);
+	screen->cmap = DefaultColormap(screen->dpy, screen->screen_num);
+
+	XParseColor(screen->dpy, screen->cmap, active_mode_col, &active_col);
+	XAllocColor(screen->dpy, screen->cmap, &active_col);
+	XParseColor(screen->dpy, screen->cmap, bar_col, &bar_color);
+	XAllocColor(screen->dpy, screen->cmap,  &bar_color);
+	XParseColor(screen->dpy, screen->cmap, parent_col, &par_col);
+	XAllocColor(screen->dpy, screen->cmap,  &par_col);
+	xft_color_alloc(screen, &white, "#ffffff");
+	xft_color_alloc(screen, &black,"#000000");
+
+/*global atoms initialization*/
+	utf8_string=XInternAtom(screen->dpy,"UTF8_STRING", False);
+	status=XInternAtom(screen->dpy, "status", False);
+	
+	checkOtherWM();
+/*the gut of the wm*/
+	XSelectInput(screen->dpy, screen->rootwin, SubstructureRedirectMask|SubstructureNotifyMask|ExposureMask);
+	
+	font=xft_font_alloc(screen, g_font);
+/*global root grabs*/
+
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, XK_S), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, XK_d), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, XK_f), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, XK_a), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, XK_t), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, XK_c), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, XK_1), Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);	
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, XK_2), Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+
+	XGrabButton(screen->dpy, 1, Mod1Mask,screen->rootwin, True,
+            ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
+    	XGrabButton(screen->dpy, 3, Mod1Mask,screen->rootwin, True,
+            ButtonPressMask|ButtonReleaseMask|PointerMotionMask, GrabModeAsync, GrabModeAsync, None, None);
+	if(showbar)
+		drawBar();
+	defineCursor(screen->rootwin);	
 }
+
 void keyPress(XEvent *ev)
 {
 	XKeyEvent *event=&ev->xkey;
@@ -523,12 +440,6 @@ void leaveNotify(XEvent *ev)
 	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),0,0,20,20);
 	XDrawLine(screen->dpy,event->window, DefaultGC(screen->dpy, screen->screen_num),20,0,0,20);
 
-//	XFlush(screen->dpy);
-
-}
-void mappingNotify(XEvent *ev)
-{
-/*nothing for the wm to do*/
 }
 void mapRequest(XEvent *ev)
 {
@@ -559,13 +470,13 @@ void motionNotify(XEvent *ev){
 			
 			new_x=MAX((attr.x + (start.button==1 ? xdiff : 0)),0); /*left boundary*/
 			new_x=MIN((screen->s_width-attr.width),new_x);/*right boundary*/
-			new_y=MAX((attr.y + (start.button==1 ? ydiff : 0)),20);/*upper bound*/
+			new_y=MAX((attr.y + (start.button==1 ? ydiff : 0)),(showbar?20:0));/*upper bound*/
 			new_y=MIN((screen->s_height-attr.height),new_y);/*lower bound*/
 
 			new_width=MAX(40, attr.width + (start.button==3 ? xdiff : 0));/*minimum width*/
 			new_height=MAX(40, attr.height + (start.button==3 ? ydiff : 0));/*minimum height*/
 			new_width=((attr.x+new_width)>screen->s_width)?(screen->s_width-attr.x):new_width;/*maximum width*/	
-			new_height=((attr.y+new_height)>screen->s_height)?(screen->s_height-attr.y):new_height;/*maximum width*/
+			new_height=((attr.y+new_height)>screen->s_height)?(screen->s_height-attr.y):new_height;/*maximum height*/
 			
 			XMoveResizeWindow(screen->dpy, start.subwindow,
 				new_x,
@@ -701,47 +612,23 @@ void reparentWin(Window win)
 		
 	}
 	XReparentWindow(screen->dpy,win,parent_win,0,20);
-
 	XMapWindow(screen->dpy, parent_win);
 			
 }
-void switchToCursorless(XEvent *ev)
-{
-	mode=0;
 
-	XSetWindowBackground(screen->dpy,cursorless_mode->win,active_col.pixel);
-	XSetWindowBackground(screen->dpy, cursor_mode->win, bar_color.pixel);
-	XClearWindow(screen->dpy,cursorless_mode->win);
-	XClearWindow(screen->dpy,cursor_mode->win);
-	drawTextCenter(screen,cursorless_mode,"1");
-	drawTextCenter(screen,cursor_mode,"2");
-	/*unmapping cursor windows since we're now in cursorless mode*/
-
-	for(int i=0;i<cursor_length;i++)
-	{
-		XUnmapWindow(screen->dpy,cursor_wins[i]);
-	}
-	/*mapping cursorless wins*/
-
-	for(int i=0; i<cursorless_length;i++)
-	{
-		XMapWindow(screen->dpy,cursorless_wins[i]);
-	}
-
-
-	XFlush(screen->dpy);
-}
 void switchToCursor(XEvent *ev)
 {
 	mode=1;
+	if(showbar)
+	{
+		XSetWindowBackground(screen->dpy,cursor_mode->win,active_col.pixel);
+		XSetWindowBackground(screen->dpy, cursorless_mode->win, bar_color.pixel);
+		XClearWindow(screen->dpy,cursorless_mode->win);
+		XClearWindow(screen->dpy,cursor_mode->win);
 
-	XSetWindowBackground(screen->dpy,cursor_mode->win,active_col.pixel);
-	XSetWindowBackground(screen->dpy, cursorless_mode->win, bar_color.pixel);
-	XClearWindow(screen->dpy,cursorless_mode->win);
-	XClearWindow(screen->dpy,cursor_mode->win);
-
-	drawTextCenter(screen,cursorless_mode,"1");
-	drawTextCenter(screen,cursor_mode,"2");
+		drawTextCenter(screen,cursorless_mode,"1");
+		drawTextCenter(screen,cursor_mode,"2");
+	}
 /*unmapping cursorless windows since we're now in cursor mode*/
 	for(int i=0; i<cursorless_length;i++)
 	{
@@ -755,6 +642,33 @@ void switchToCursor(XEvent *ev)
 
 	XFlush(screen->dpy);
 
+}
+void switchToCursorless(XEvent *ev)
+{
+	mode=0;
+	if(showbar)
+	{
+		XSetWindowBackground(screen->dpy,cursorless_mode->win,active_col.pixel);
+		XSetWindowBackground(screen->dpy, cursor_mode->win, bar_color.pixel);
+		XClearWindow(screen->dpy,cursorless_mode->win);
+		XClearWindow(screen->dpy,cursor_mode->win);
+		drawTextCenter(screen,cursorless_mode,"1");
+		drawTextCenter(screen,cursor_mode,"2");
+	}
+	/*unmapping cursor windows since we're now in cursorless mode*/
+
+	for(int i=0;i<cursor_length;i++)
+	{
+		XUnmapWindow(screen->dpy,cursor_wins[i]);
+	}
+	/*mapping cursorless wins*/
+
+	for(int i=0; i<cursorless_length;i++)
+	{
+		XMapWindow(screen->dpy,cursorless_wins[i]);
+	}
+
+	XFlush(screen->dpy);
 }
 void switchToMaster(XEvent *ev)
 {
@@ -781,17 +695,15 @@ void switchToMaster(XEvent *ev)
 							PropModeReplace,(unsigned char*) "master",6);
 	XWindowChanges attr;
 	attr.x=0;
-	attr.y=20;
+	attr.y=(showbar?20:0);
 	attr.width=screen->s_width/2;
-	attr.height=(screen->s_height)-20;
+	attr.height=(screen->s_height)-(showbar?20:0);
 	XConfigureWindow(screen->dpy,new_master,CWX | CWY | CWWidth | CWHeight,&attr);
 
 	/*reorganize the list after the structure has been messed up*/
-
 	organizeCursorLessList();
 
 /*re-tile the stack windows*/
-
 	tileStack();
 	
 }
@@ -809,7 +721,6 @@ void switchToStack(XEvent *ev)
 	if(strcmp(p,"stack")==0)
 		return;
 
-
 /*changing the old master window to a stack property*/
 
 	Window old_stack=cursorless_wins[cursorless_length-2];
@@ -821,17 +732,15 @@ void switchToStack(XEvent *ev)
 							PropModeReplace,(unsigned char*) "stack",5);
 	XWindowChanges attr;
 	attr.x=0;
-	attr.y=20;
+	attr.y=(showbar?20:0);
 	attr.width=screen->s_width/2;
-	attr.height=(screen->s_height)-20;
+	attr.height=(screen->s_height)-(showbar?20:0);
 	XConfigureWindow(screen->dpy,old_stack,CWX | CWY | CWWidth | CWHeight,&attr);
 
 	/*reorganize the list after the structure has been messed up*/
-
 	organizeCursorLessList();
 
 /*re-tile the stack windows*/
-
 	tileStack();
 
 }
@@ -849,12 +758,11 @@ void tileStack()
 	
 	XWindowChanges attr;
 	attr.width=screen->s_width/2;
-	attr.height=(screen->s_height-20)/stack_num;
+	attr.height=(screen->s_height-(showbar?20:0))/stack_num;
 	attr.x=screen->s_width/2;
 	for(int i=0; i<stack_num;i++)
 	{
-		attr.y=(stack_num-i-1)*attr.height+20;
-		
+		attr.y=(stack_num-i-1)*attr.height+(showbar?20:0);		
 		XConfigureWindow(screen->dpy,cursorless_wins[i], CWX | CWY | CWWidth | CWHeight, &attr);
 	}
 }
@@ -888,11 +796,53 @@ void removeFromCursorList(Window win)
 	}
 	cursor_length --;
 }		
-void unmapNotify(XEvent *ev)
-{
 
-/*nothing for the wm to do*/
+int wmError(Display *dpy, XErrorEvent *ev)
+{
+	fprintf(stderr, "another wm is already running");
+	exit(1);
+	return -1;
 }
+int xerror(Display *dpy, XErrorEvent *ee)
+{
+	if (ee->error_code == BadWindow
+	|| (ee->request_code == X_SetInputFocus && ee->error_code == BadMatch)
+	|| (ee->request_code == X_PolyText8 && ee->error_code == BadDrawable)
+	|| (ee->request_code == X_PolyFillRectangle && ee->error_code == BadDrawable)
+	|| (ee->request_code == X_PolySegment && ee->error_code == BadDrawable)
+	|| (ee->request_code == X_ConfigureWindow && ee->error_code == BadMatch)
+	|| (ee->request_code == X_GrabButton && ee->error_code == BadAccess)
+	|| (ee->request_code == X_GrabKey && ee->error_code == BadAccess)
+	|| (ee->request_code == X_CopyArea && ee->error_code == BadDrawable))
+		return 0;
+	fprintf(stderr, "fatal error: request code=%d, error code=%d\n",
+		ee->request_code, ee->error_code);
+	return xerrorxlib(dpy, ee); 
+}
+void xft_color_alloc(MyScreen *screen, XftColor *color, const char *colorName)
+{
+	if (!screen || !color || !colorName)
+		return;
+
+	if (!XftColorAllocName(screen->dpy, DefaultVisual(screen->dpy, screen->screen_num),
+	                       screen->cmap,
+	                       colorName, color))
+		fprintf(stderr,"error, cannot allocate color '%s'", colorName);
+}
+
+static XftFont *xft_font_alloc(MyScreen *screen, const char *fontname)
+{
+	XftFont *font = NULL;
+
+	if (fontname && screen) {
+			if (!(font = XftFontOpenName(screen->dpy, screen->screen_num, fontname))) {
+			fprintf(stderr, "error with name '%s'\n", fontname);
+			return NULL;
+		}
+	}
+	return font;
+}
+
 int main()
 {
 	init();
