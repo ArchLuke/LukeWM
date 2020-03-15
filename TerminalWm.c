@@ -599,7 +599,7 @@ void reparentWin(Window win)
 	XWindowAttributes attr;
 	XGetWindowAttributes(screen->dpy, win, &attr);
 
-	Window parent_win=XCreateSimpleWindow(screen->dpy,screen->rootwin, attr.x, attr.y-20,attr.width, attr.height+20,1,BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
+	Window parent_win=XCreateSimpleWindow(screen->dpy,screen->rootwin, attr.x, attr.y-20,attr.width, attr.height+20,2,par_col.pixel,par_col.pixel);
 	if(mode==1)
 	{
 	/*if the window is created in cursor mode, the master stack status of the window is 0, i.e. it does not aply*/
