@@ -1,7 +1,8 @@
 LukeWM written by Luke Kong
 
 Philosophy:
-LukeWM has two modes, cursor mode and cursorless mode. Cursorless mode implements a structure similar to DWM's tiling manager, but usage does not require any cursors/pointers. Each window will have a number on top of it, and users will be able to change their input focus using these numbers and key bindings found in config.h. I will also implement the master/stack structure a bit differently than DWM. Cursor mode is similar to Windows. Usage in cursor mode does not require keyboards (except for typing). Cursor mode will be a basic reparenting window manager, where each window will be given a close button. Windows in cursor mode will be resizable/moable using the normal cursor. 
+LukeWM has two modes, cursor mode and cursorless mode. Cursorless mode implements a structure similar to DWM's tiling manager, but usage does not require any cursors/pointers. I will also implement the master/stack structure a bit differently than DWM. Cursor mode is similar to Windows. Usage in cursor mode does not require keyboards (except for typing). Cursor mode will be a basic reparenting window manager, where each window will be given a close button. Windows in cursor mode will be resizable/moable using the normal cursor. 
 
 Usage:
+Switch to Cursorless mode with alt+1. Switch to cursor mode with alt+2. Your current mode will be shown with a top bar. With the cursorless mode, use alt+shift+t to open a terminal; alt+shift+c to destroy a window;alt+shift+a to switch a window to master(visit dwm's website to learn about the master/stack structure;alt+shift+f to switch a window to stack;alt+shift+s to switch your current input focus to the left;alt+shift+d to switch your input focus to the right. With cursor mode, use alt+button 1 to move;alt+button3 to resize; the close button to close. Use config.h to configure. 
 
