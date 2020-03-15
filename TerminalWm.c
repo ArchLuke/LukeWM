@@ -68,12 +68,10 @@ int mode=1;
 
 Atom utf8_string;
 /*
-I made mode, tag_number, and status of type Atom for POTENTIAL future inter-client communications. 
-I am imagining writing other helper X applications, specifically made for TerminalWM, that further enhance the usability of my DM. These applications may require the mode, tag_number, and status of itself or any other windows.
+I made status of type Atom for POTENTIAL future inter-client communications. 
+I am imagining writing other helper X applications, specifically made for TerminalWM, that further enhance the usability of my DM. These applications may require the master stack statuses.
 
 */
-Atom tag_number; /*the number that appears on top of each window.
-This number is 0 if the window is in cursor mode;*/
 Atom status;/*the master/stack status of a window
 The number is 0 if the window is in cursor mode*/
 
@@ -101,6 +99,7 @@ void createNotify(XEvent *);
 void destroyMaster();
 void destroyNotify(XEvent *);
 void destroyWin(XEvent *);
+void drawTags();
 void enterNotify(XEvent *);
 void expose(XEvent *);
 void focusIn(XEvent *);
@@ -109,6 +108,8 @@ void leaveNotify(XEvent *);
 void mappingNotify(XEvent *);
 void mapRequest(XEvent *);
 void motionNotify(XEvent *);
+void moveLeft(XEvent *);
+void moveRight(XEvent *);
 void organizeCursorLessList();
 void reparentWin(Window);
 void switchToCursorless(XEvent *);
@@ -213,7 +214,6 @@ void init()
 
 /*global atoms initialization*/
 	utf8_string=XInternAtom(screen->dpy,"UTF8_STRING", False);
-	tag_number=XInternAtom(screen->dpy,"tag number",False);
 	status=XInternAtom(screen->dpy, "status", False);
 	
 	checkOtherWM();
@@ -223,7 +223,11 @@ void init()
 	font=xft_font_alloc(screen, g_font);
 /*global root grabs*/
 
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x73), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
 	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x64), ShiftMask | Mod1Mask,
+            screen->rootwin, True, GrabModeAsync, GrabModeAsync);
+	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x66), ShiftMask | Mod1Mask,
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);
 	XGrabKey(screen->dpy, XKeysymToKeycode(screen->dpy, 0x61), ShiftMask | Mod1Mask,
             screen->rootwin, True, GrabModeAsync, GrabModeAsync);
@@ -409,7 +413,7 @@ void configureRequest(XEvent *ev)
 }
 void configureNotify(XEvent *ev)
 {
-
+/*nothing for the wm to do*/
 }
 void createTerm(XEvent *ev)
 {
@@ -417,7 +421,7 @@ void createTerm(XEvent *ev)
 }
 void destroyNotify(XEvent *ev)
 {
-
+/*nothing for the wm to do*/
 }
 void destroyMaster()
 {
@@ -466,6 +470,10 @@ void destroyWin(XEvent *ev)
 			destroyMaster();/*if it is a master window, destroy the current master window and bring a new one*/
 	}
 }
+void drawTags()
+{
+	
+}
 void enterNotify(XEvent *ev)
 {
 	XCrossingEvent *event=&ev->xcrossing;
@@ -492,6 +500,7 @@ void expose(XEvent *ev)
 }
 void focusIn(XEvent *ev)
 {
+/*nothing for the wm to do*/
 }
 void keyPress(XEvent *ev)
 {
@@ -519,6 +528,7 @@ void leaveNotify(XEvent *ev)
 }
 void mappingNotify(XEvent *ev)
 {
+/*nothing for the wm to do*/
 }
 void mapRequest(XEvent *ev)
 {
@@ -575,7 +585,62 @@ void motionNotify(XEvent *ev){
 		}
 	}
 }
+void moveLeft(XEvent *ev)
+{
+	XKeyEvent *event=&ev->xkey;
+	Window old_focus;
+	int state;
+	XGetInputFocus(screen->dpy,&old_focus,&state);
 
+	Window *focus;
+	Window *childwin;
+	Window parentWin;
+	Window rootwin;
+	int number;
+
+	int i=0;
+	for(i = 0; i < cursorless_length; i++)
+	{
+		XQueryTree(screen->dpy, cursorless_wins[i],&rootwin,&parentWin,&focus,&number);
+  		if(*focus==old_focus)
+
+			break;
+	}
+	int new_focus=MIN(i+1,cursorless_length-1);
+
+	XQueryTree(screen->dpy,cursorless_wins[new_focus],&rootwin,&parentWin, &focus,&number);
+	printf("%d + %d\n", i,number);
+	XSetInputFocus(screen->dpy,*focus,RevertToPointerRoot, CurrentTime);
+}
+void moveRight(XEvent *ev)
+{
+
+	XKeyEvent *event=&ev->xkey;
+	Window old_focus;
+	int state;
+	XGetInputFocus(screen->dpy,&old_focus,&state);
+
+	Window *focus;
+	Window *childwin;
+	Window parentWin;
+	Window rootwin;
+	int number;
+
+	int i=0;
+	for(i = 0; i < cursorless_length; i++)
+	{
+		XQueryTree(screen->dpy, cursorless_wins[i],&rootwin,&parentWin,&focus,&number);
+  		if(*focus==old_focus)
+
+			break;
+	}
+
+	int new_focus=MAX(i-1,0);
+
+	XQueryTree(screen->dpy,cursorless_wins[new_focus],&rootwin,&parentWin, &focus,&number);
+	XSetInputFocus(screen->dpy,*focus,RevertToPointerRoot, CurrentTime);
+
+}
 /*organizeCursorLessList makes sure that the master window is always on the top of the cursorless_wins list. Many functions would not work otherwise, as they assume the position of the master window in the list*/
 
 void organizeCursorLessList()
@@ -618,8 +683,6 @@ void reparentWin(Window win)
 	{
 		XChangeProperty(screen->dpy,parent_win,status,utf8_string, 8, PropModeReplace, 
 							(unsigned char*)"0", 1);		
-		XChangeProperty(screen->dpy,parent_win,tag_number,utf8_string,8, PropModeReplace, 
-							(unsigned char*)"0", 1);
 		addToCursorList(parent_win);
 		
 		Window cross_win=XCreateSimpleWindow(screen->dpy, parent_win,attr.width-20,0,20,20, 1, BlackPixel(screen->dpy, screen->screen_num),par_col.pixel);
@@ -828,6 +891,7 @@ void removeFromCursorList(Window win)
 void unmapNotify(XEvent *ev)
 {
 
+/*nothing for the wm to do*/
 }
 int main()
 {

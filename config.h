@@ -19,8 +19,9 @@ static Key keys[]={
 	{MODEMASK, XK_1, switchToCursorless},
 	{MODEMASK, XK_2, switchToCursor},
 	{WINDOWMASK, XK_a, switchToMaster},
-	{WINDOWMASK, XK_d, switchToStack},
+	{WINDOWMASK, XK_f, switchToStack},
 	{WINDOWMASK, XK_c, destroyWin},
-	{WINDOWMASK, XK_t, createTerm}
-	
+	{WINDOWMASK, XK_t, createTerm},
+	{WINDOWMASK, XK_s, moveLeft},
+	{WINDOWMASK, XK_d, moveRight}	
 };
