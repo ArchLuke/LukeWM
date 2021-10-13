@@ -11,9 +11,6 @@ static const Pixmap background; /*background image of the cursor mode*/
 #define MODEMASK Mod1Mask
 #define WINDOWMASK (ShiftMask | Mod1Mask)/*change focus&input focus with WINOWMASK+window number*/
 
-static const int cursorless_mode_num = 1; /*switch to cursorless mode with MODEMASK+1*/
-static const int cursor_mode_num = 2; /*switch to cursor mode with MODEMASK+2*/
-
 static Key keys[]={
 	{MODEMASK, XK_1, switchToCursorless},
 	{MODEMASK, XK_2, switchToCursor},
