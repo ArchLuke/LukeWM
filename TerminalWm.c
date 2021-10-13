@@ -504,6 +504,8 @@ void motionNotify(XEvent *ev){
 }
 void moveLeft(XEvent *ev)
 {
+	if(mode)
+		return;
 	XKeyEvent *event=&ev->xkey;
 	Window old_focus;
 	int state;
@@ -533,7 +535,8 @@ void moveLeft(XEvent *ev)
 }
 void moveRight(XEvent *ev)
 {
-
+	if(mode)
+		return;
 	XKeyEvent *event=&ev->xkey;
 	Window old_focus;
 	int state;
@@ -686,7 +689,8 @@ void switchToCursorless(XEvent *ev)
 void switchToMaster(XEvent *ev)
 {
 /*first test if the window is already a master. If so, return*/
-
+	if(mode)
+		return;
 	XKeyEvent *event=&ev->xkey;
 	int di;
 	unsigned long dl;
@@ -724,7 +728,8 @@ void switchToMaster(XEvent *ev)
 void switchToStack(XEvent *ev)
 {
 /*first test if the window is already a stack window. If so, return*/
-
+	if(mode)
+		return;
 	XKeyEvent *event=&ev->xkey;
 	int di;
 	unsigned long dl;
