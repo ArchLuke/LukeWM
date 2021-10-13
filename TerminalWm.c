@@ -288,7 +288,7 @@ void defineCursor(Window win)
 
 void destroyMaster()
 {
-	if(cursorless_length<2)
+	if(cursorless_length<1)
 		return;
 
 	Window new_master=cursorless_wins[cursorless_length-1];
@@ -448,6 +448,17 @@ void leaveNotify(XEvent *ev)
 }
 void mapRequest(XEvent *ev)
 {
+
+	if(mode)
+	{
+		if (cursor_length>9)
+			return;
+	}else
+	{	
+		if (cursorless_length>9)
+			return;
+	}
+		
 	XMapRequestEvent *event;
 	event=&ev->xmaprequest;
 /*reparenting with our own window, adding close buttons and etc.*/
@@ -530,7 +541,6 @@ void moveLeft(XEvent *ev)
 	int new_focus=MIN(i+1,cursorless_length-1);
 
 	XQueryTree(screen->dpy,cursorless_wins[new_focus],&rootwin,&parentWin, &focus,&number);
-	printf("%d + %d\n", i,number);
 	XSetInputFocus(screen->dpy,*focus,RevertToPointerRoot, CurrentTime);
 }
 void moveRight(XEvent *ev)
